@@ -4,16 +4,17 @@ This file defines how agents use an **IT Glue MCP server** to read an MSP's IT d
 #### 1. Server Contract
 Use a server that meets all of the following. NewPush maintains an internal reference server with this contract; any server that honours it works.
 
-- **Read-only.** Every tool performs a GET. No tool creates, changes, archives, or deletes IT Glue records.
+- **Read-only for agents.** Every tool an agent sees performs a GET. A server may carry operator-only maintenance tools (the reference server has one that retires dead Confluence and Jira links inside the server, without returning content), but they are hidden and refused unless the operator sets a flag such as `ITGLUE_ENABLE_EDITS=true` on the server process. Agent deployments leave it unset. No tool, including an operator tool, creates, archives, or deletes records.
 - **Document tools.** `search_documents` (organization id or exact organization name, plus a name query) and `read_document` (document id, plain text of the sections in order). IT Glue ignores name filters on an organization's document list, so the server matches names client-side and reports `complete: false` when it stopped scanning early. An organization name is matched exactly; no match returns an error, and an ambiguous name returns an error that lists the candidate ids and names.
 - **Redacted output.** Every result has credentials replaced with `[REDACTED:credential]` before it reaches the model, whether they sit in credential-named fields at any depth or in free text and HTML tables. The result reports a `redactions` count.
 - **Untrusted wrapper.** Every result is wrapped as `{ "source": "itglue", "trust": "untrusted-data", "notice": ..., "redactions": n, "data": ... }`.
-- **Passwords off.** `get_password` and `list_passwords` are hidden and refused unless the operator sets `ITGLUE_ENABLE_PASSWORDS=true` on the server process. Agent deployments leave it unset.
+- **Passwords off.** `get_password` and `list_passwords` are hidden and refused unless the operator sets `ITGLUE_ENABLE_PASSWORDS=true` on the server process. Agent deployments leave it unset. Both flags are read from the process environment only; connection credentials and gateway headers cannot set them.
 - **Safe paths and retries.** Ids are validated as plain path segments. 429, 5xx, and transient network errors retry with exponential backoff, honouring `Retry-After`, per `scripts/resilience_helpers.js`.
 
 #### 2. Authentication (Fetch-on-Demand)
 - `ITGLUE_API_KEY` and `ITGLUE_BASE_URL` live in SecretOps and are injected at run time, for example `infisical run --env=dev -- node .../stdio-server.js`. Never paste the key into chat, a file, or a log.
 - An IT Glue administrator creates the key under Account > Settings > API Keys. **Create it without password access.** Redaction is the second line of defence, not the first.
+- **Separate the operator key.** The flag hides edit tools, but the key decides what the API allows. Where IT Glue offers read-only keys, the agent's key is read-only. Otherwise, operator maintenance runs in its own server process with its own key, stored under a different secret name, and the agent's server never has the edit flag set.
 - Regional base URLs: `https://api.itglue.com` (US), `https://api.eu.itglue.com` (EU), `https://api.au.itglue.com` (AU).
 - A 401 or 403 means the key is missing, revoked, or lacks access. Report it and stop; do not retry.
 
