@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "contract": "Each question must surface source in the top search hits, and those hits must contain mustMention.",
   "mcp": "https://mcp.noemi.newpush.com/mcp",
   "questions": [
     {

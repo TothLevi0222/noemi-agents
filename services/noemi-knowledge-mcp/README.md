@@ -19,7 +19,7 @@ discovery only (website Decision 220 / PR #572) and must not host a fake `/mcp`.
 
 ## FAQ retrieval check
 
-`eval/faq-questions.json` is the same golden set the marketing site quotes on `/faq`. `src/faq-retrieval.test.ts` asserts each question returns its expected document in the top hits and that those hits contain the required phrases. The website calls the live `search_knowledge` tool at production build time; this test locks the same questions to the corpus in this repo.
+`eval/faq-questions.json` is this service's retrieval contract: public questions about Project NoéMI, the corpus document that must rank in the top hits, and the phrases those hits must contain. `src/faq-retrieval.test.ts` checks that against the corpus built in this repo (Decision [2026-09-30-0001]).
 
 ## Local development
 

@@ -3,8 +3,9 @@ import questionsDoc from "../eval/faq-questions.json";
 import { searchKnowledge } from "./search";
 
 /**
- * Same golden set as the marketing site's /faq quotations
- * (website lib/faq/questions.json). Keep the two files identical.
+ * Retrieval contract for this service. Each question in
+ * eval/faq-questions.json must surface its corpus document in the top
+ * hits, and those hits must contain the required phrases.
  */
 const TOP_K = 5;
 
