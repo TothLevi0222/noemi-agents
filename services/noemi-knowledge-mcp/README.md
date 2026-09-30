@@ -17,6 +17,10 @@ discovery only (website Decision 220 / PR #572) and must not host a fake `/mcp`.
 | `get_document` | Full text by path or chunk id |
 | `list_documents` | Corpus inventory |
 
+## FAQ retrieval check
+
+`eval/faq-questions.json` is the same golden set the marketing site quotes on `/faq`. `src/faq-retrieval.test.ts` asserts each question returns its expected document in the top hits and that those hits contain the required phrases. The website calls the live `search_knowledge` tool at production build time; this test locks the same questions to the corpus in this repo.
+
 ## Local development
 
 ```bash
