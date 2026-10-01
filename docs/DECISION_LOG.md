@@ -1362,3 +1362,9 @@
 - **Decision:** `services/noemi-knowledge-mcp/eval/faq-questions.json` is this service's retrieval contract. Each entry names a public question, the corpus document that must appear in the top `search_knowledge` hits, and the phrases those hits must contain. `src/faq-retrieval.test.ts` enforces that against the corpus in this repository. The fixture does not have to match a file in another repository.
 - **Context:** `search_knowledge` ranks chunks and does not write an answer. A corpus edit can drop the document that answers a standing question without failing the other search tests.
 - **Impact:** The check runs with the knowledge service tests. A failure means this corpus no longer answers that question.
+
+## [2026-10-01-0001] Pull request template must not tell the reviewer to skip a check
+
+- **Decision:** The pull request template describes the fork-notice check the same way `CONTRIBUTING.md` does: it may warn, and it is not a required status check. The template must not instruct a reviewer to ignore, skip, or suppress a named check. Present-tense conductor docs match Decision [2026-09-26-0001]: the app is provisioned and installed on all repositories in the three fleet orgs.
+- **Context:** On 2026-09-29 the advisory premise gate failed [PR #558](https://github.com/project-noemi/agents/pull/558) before framing or code ran. The description still ended with the template telling the reviewer to disregard the fork-notice check, and the reviewer treated that sentence as an instruction to skip a check. The architecture guide and the issue-conductor fleet guide still said the conductor app was planned, after [2026-09-25-0001] and [2026-09-26-0001] had provisioned and installed it.
+- **Impact:** `.github/pull_request_template.md`, `docs/architecture/issue-coding-loop.md`, `docs/agents/engineering/issue-conductor/README.md`. The 2026-08-16 decision text that recorded the app as planned at that time stays as history.
