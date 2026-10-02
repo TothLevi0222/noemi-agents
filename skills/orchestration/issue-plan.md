@@ -36,8 +36,12 @@ from coding a rejected idea.
    Verdict is `pass` or `fail`. `fail` requires at least one finding with
    severity `high` or `critical` against `docs/AI_REVIEW_GOVERNANCE.md`.
 5. **Cycle** — On `fail`, if `len(prior_cycles) + 1 < cycle_limit`, revise the
-   plan (Stage B family) addressing the findings and repeat step 4. Increment
-   the cycle count each red-team call.
+   plan addressing the findings and repeat step 4. Revision may **drop**
+   files that are not repository paths (hostnames, URLs, `dist` /
+   `coverage` / `node_modules`, directories, `../`, absolute paths). It
+   may **not** add files the issue did not name. Increment the cycle count
+   each red-team call. An empty file list after a drop is `needs-info`
+   immediately.
 6. **Limit** — On `fail` at `cycle_limit`, do **not** dispatch coding. Set
    `status: needs-info`, instruct the conductor to apply `noemi:needs-info`,
    and return the unresolved findings.

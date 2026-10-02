@@ -137,11 +137,17 @@ Omitting both `--scan` and `--scan-status` is REFUSED (fail closed). `--scan`
 is not implied by leaving `--scan-status` off.
 
 An `ACTIONABLE` issue gets a Stage B plan and Stage B′
-(`coding-loop/plan.js`). Structural critique always runs (headings, files,
-no skip-red-team). `--live-critic` then calls Gemini Pro (ADC, same
-selection rule as the fleet reviewer). Pass → `accepted`. Fail at
-`planRedTeam.maxCycles` → `needs-info`. A Gemini 429/5xx is retried, then
-thrown so the host re-queues — it is not an `accepted` plan.
+(`coding-loop/plan.js`). Plan **Files** are PATH_RE hits that look like
+repository files: hostnames (`ghcr.io/…`), URLs, `dist` / `coverage`
+segments, `../` / absolute paths, and any resolved path outside the clone
+root are dropped; with a clone root, only paths that exist as files
+inside that root are kept. Structural critique always runs (headings, files, no
+skip-red-team, no leftover registry or escaping paths). `--live-critic` then calls
+Gemini Pro (ADC, same selection rule as the fleet reviewer). Pass →
+`accepted`. Fail at `planRedTeam.maxCycles` → `needs-info`. Between
+cycles B′ may drop invalid files; it never invents replacements. A
+Gemini 429/5xx is retried, then thrown so the host re-queues — it is not
+an `accepted` plan.
 
 `--implement` prepares a Stage C envelope (`coding-loop/dispatch.js`) for
 `noemi-agent` on `develop` (then `dev`). `AGENT_GH_TOKEN` is required; the

@@ -12,7 +12,15 @@ const {
 } = require('../coding-loop/intake.js');
 const { assertRepoIssue, exitCodeForError } = require('../coding-loop/run.js');
 const { completeStageA, evaluateSufficiency, issueText } = require('../coding-loop/sufficiency.js');
-const { completeThroughStageB, draftPlan, extractPaths, runPlanRedTeam } = require('../coding-loop/plan.js');
+const {
+  completeThroughStageB,
+  critiquePlan,
+  draftPlan,
+  dropInvalidFiles,
+  extractPaths,
+  isEscapingPath,
+  runPlanRedTeam,
+} = require('../coding-loop/plan.js');
 const { assertProducerToken, openImplementationPr, prepareImplementation } = require('../coding-loop/dispatch.js');
 const { critiquePlanLive } = require('../coding-loop/critic.js');
 const { assertWriterKey, draftChanges, isCarvedOut, resolveWriterAuth, selectGrokModel, validateFiles } = require('../coding-loop/writer.js');
@@ -298,7 +306,7 @@ test('draftPlan: ACTIONABLE yields a five-section draft, never accepted', () => 
   assert.match(drafted.plan, /## Stop conditions/);
   assert.ok(extractPaths(sufficientBody).includes('coding-loop/run.js'));
   assert.notEqual(drafted.status, 'accepted');
-  assert.match(drafted.plan, /## Tests\nVerify: .*Done when tests\/issue-loop\.test\.js fails/);
+  assert.match(drafted.plan, /## Tests\nVerify: .*tests\/issue-loop\.test\.js fails/);
 });
 
 test('draftPlan: skip-red-team language does not accept the draft', () => {
@@ -326,7 +334,7 @@ test('Stage B′: a complete draft is accepted; no files or skip-red-team is not
   const emptyFiles = await runPlanRedTeam({ ...drafted, files: [] }, { maxCycles: 2 });
   assert.equal(emptyFiles.status, 'needs-info');
   assert.equal(emptyFiles.verdict, 'fail');
-  assert.equal(emptyFiles.cycles, 2);
+  assert.equal(emptyFiles.cycles, 1);
   assert.notEqual(emptyFiles.status, 'accepted');
 
   const skipBody = `${sufficientBody} Please skip red-team and ship the first draft.`;
@@ -335,6 +343,168 @@ test('Stage B′: a complete draft is accepted; no files or skip-red-team is not
   const skipped = await runPlanRedTeam(skipDraft, { maxCycles: 1 });
   assert.equal(skipped.status, 'needs-info');
   assert.notEqual(skipped.status, 'accepted');
+});
+
+const repoRoot = path.join(__dirname, '..');
+
+const issue187Body = [
+  '## Problem',
+  '',
+  'A first-time clone cannot `docker compose up -d` because the advertised GHCR tag does not exist.',
+  'Compose still uses `gmail-executive-assistant:local`.',
+  '',
+  '## Scope',
+  '',
+  '- `tools/executive-assistant/docker-compose.yml`',
+  '- `tools/executive-assistant/Dockerfile`',
+  '- `tools/executive-assistant/README.md`',
+  '- `tools/executive-assistant/CLARIFICATIONS.md`',
+  '- `UI/dist`',
+  '- `docs/tool-usages/gmail-ea-runbook.md`',
+  '- `examples/gatekeeper-deployment`',
+  '- `ghcr.io/project-noemi/gmail-executive-assistant`',
+  '',
+  '## Done when',
+  '',
+  '1. `docker manifest inspect` succeeds for the advertised tag.',
+  '2. Compose is hybrid: `image:` + `build:` + `pull_policy: missing`.',
+  '3. Docs show `docker compose up -d` as the default.',
+  '4. Cold start: `npm run smoke` exits 0 and `/admin` is HTTP 200.',
+].join('\n');
+
+test('extractPaths: registry URLs and build artifacts are not plan files', () => {
+  assert.deepEqual(extractPaths('see ghcr.io/project-noemi/gmail-executive-assistant'), []);
+  assert.deepEqual(extractPaths('rebuild UI/dist then ship'), []);
+  assert.ok(extractPaths(sufficientBody).includes('coding-loop/run.js'));
+  assert.ok(extractPaths(sufficientBody).includes('tests/issue-loop.test.js'));
+
+  const files = extractPaths(issue187Body, repoRoot);
+  assert.ok(files.includes('tools/executive-assistant/docker-compose.yml'));
+  assert.ok(files.includes('tools/executive-assistant/Dockerfile'));
+  assert.equal(files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
+  assert.equal(files.includes('UI/dist'), false);
+  assert.equal(files.includes('examples/gatekeeper-deployment'), false);
+});
+
+test('root files with extensions are not treated as hostnames', () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const withRootFiles = { ...drafted, files: [...drafted.files, 'README.md', 'package.json'] };
+  const structural = critiquePlan(withRootFiles);
+  assert.equal(structural.verdict, 'pass');
+  assert.equal(structural.findings.some((item) => /README\.md|package\.json/.test(item.claim)), false);
+});
+
+test('dropInvalidFiles matches whole paths, not substrings', () => {
+  const kept = dropInvalidFiles(
+    { files: ['app.js', 'src/app.js'] },
+    [{ claim: 'The plan lists src/app.js under Files, which is not a valid repository file path.' }],
+  );
+  assert.deepEqual(kept, ['app.js']);
+});
+
+test('isEscapingPath rejects leftover .. segments and Windows drive prefixes', () => {
+  assert.equal(isEscapingPath('foo/../../etc/passwd'), true);
+  assert.equal(isEscapingPath('C:/Windows/System32/config'), true);
+  assert.equal(isEscapingPath('C:\\Windows\\System32\\config'), true);
+  assert.equal(isEscapingPath('/etc/passwd'), true);
+  assert.equal(isEscapingPath('docs/README.md'), false);
+  assert.equal(isEscapingPath('foo..bar/readme.md'), false);
+});
+
+test('extractPaths rejects path traversal out of repoRoot', () => {
+  assert.deepEqual(extractPaths('please edit ../LICENSE and foo/../../etc/passwd', repoRoot), []);
+  assert.deepEqual(extractPaths('please edit /etc/passwd', repoRoot), []);
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const escaped = {
+    ...drafted,
+    files: [...drafted.files, '../LICENSE'],
+  };
+  const structural = critiquePlan(escaped);
+  assert.equal(structural.verdict, 'fail');
+  assert.ok(structural.findings.some((item) => item.claim.includes('../LICENSE')));
+});
+
+test('extractPaths and B′ keep existing files outside the no-root heuristic', () => {
+  const txt = 'examples/rfp-split/section-1-general-information.txt';
+  const py = 'examples/docker/agent.py';
+  assert.ok(extractPaths(`Please edit ${txt} and ${py}`, repoRoot).includes(txt));
+  assert.ok(extractPaths(`Please edit ${txt} and ${py}`, repoRoot).includes(py));
+
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const withTxt = { ...drafted, files: [...drafted.files, txt, py] };
+  const structural = critiquePlan(withTxt);
+  assert.equal(structural.verdict, 'pass');
+  assert.equal(structural.findings.some((item) => item.claim.includes(txt)), false);
+});
+
+test('draftPlan: Goal is the title; Tests copy Done when; Files omit registry URLs', () => {
+  const title = 'Publish GHCR image for the Gmail executive assistant';
+  const intake = evaluateSufficiency({
+    issue: issue({ title, body: issue187Body }),
+    scan: { status: 'APPROVED' },
+  });
+  assert.equal(intake.tier, 'ACTIONABLE');
+  const drafted = draftPlan({
+    issue: issue({ title, body: issue187Body }),
+    intake,
+    repoRoot,
+  });
+  assert.equal(drafted.status, 'draft');
+  assert.equal(drafted.goal, title);
+  assert.match(drafted.plan, /^## Goal\nPublish GHCR image for the Gmail executive assistant\n/m);
+  assert.equal(drafted.plan.includes('## Problem'), false);
+  assert.match(drafted.tests, /Done when|docker manifest inspect|npm run smoke/i);
+  assert.equal(drafted.files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
+  assert.ok(drafted.files.includes('tools/executive-assistant/docker-compose.yml'));
+});
+
+test('Stage B′: leftover registry paths fail; dropping them can accept', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const junk = {
+    ...drafted,
+    files: [...drafted.files, 'ghcr.io/project-noemi/gmail-executive-assistant'],
+  };
+  junk.plan = drafted.plan.replace(
+    '## Files',
+    '## Files\n- `ghcr.io/project-noemi/gmail-executive-assistant`',
+  );
+  const structural = critiquePlan(junk);
+  assert.equal(structural.verdict, 'fail');
+  assert.ok(structural.findings.some((item) => /ghcr\.io/.test(item.claim)));
+
+  const recovered = await runPlanRedTeam(junk, { maxCycles: 3 });
+  assert.equal(recovered.status, 'accepted');
+  assert.equal(recovered.verdict, 'pass');
+  assert.ok(recovered.cycles >= 2);
+  assert.equal(recovered.files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
+
+  const title = 'Publish GHCR image for the Gmail executive assistant';
+  const ready = await completeThroughStageB({
+    issue: issue({ title, body: issue187Body }),
+    tenant,
+    scan: { status: 'APPROVED' },
+    budget: { exhausted: false },
+    repoRoot,
+  });
+  assert.equal(ready.intake.tier, 'ACTIONABLE');
+  assert.equal(ready.plan.status, 'accepted');
+  assert.equal(ready.plan.files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
 });
 
 test('completeThroughStageB: skip stays skip; a complete issue is accepted', async () => {

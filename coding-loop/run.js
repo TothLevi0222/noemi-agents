@@ -251,6 +251,7 @@ async function main() {
     routing: loadRouting(repoRoot),
     critic: args.liveCritic ? critiquePlanLive : undefined,
     profile: args.profile,
+    repoRoot,
   });
 
   if (args.post && intake.tier !== 'SKIPPED') {
