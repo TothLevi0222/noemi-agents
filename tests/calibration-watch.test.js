@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
     parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged,
-    isRepoNotFound, tokenAfterRepoProbe,
+    isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin,
 } = require('../scripts/calibration-watch.js');
 
 // Real comment shapes from renderComment() in scripts/review-pr.js.
@@ -119,14 +119,36 @@ test('only an HTTP 404 counts as the repo being hidden from this token', () => {
     assert.equal(isRepoNotFound(forbidden), false);
 });
 
-test('the watch pins the classic fallback and still refuses a non-agent login', () => {
+test('identity verification: the expected agent login is accepted', () => {
+    const result = verifyTokenLogin('noemi-agent', 'noemi-agent');
+    assert.equal(result.allowed, true);
+    assert.equal(result.reason, '');
+});
+
+test('identity verification: a non-expected login is refused', () => {
+    const result = verifyTokenLogin('some-other-user', 'noemi-agent');
+    assert.equal(result.allowed, false);
+    assert.match(result.reason, /some-other-user/);
+    assert.match(result.reason, /expected noemi-agent/);
+    assert.match(result.reason, /Refusing to open a pull request/);
+});
+
+test('identity verification: defaults to noemi-agent when expected is empty', () => {
+    const goodResult = verifyTokenLogin('noemi-agent', '');
+    assert.equal(goodResult.allowed, true);
+    const badResult = verifyTokenLogin('wrong-user', '');
+    assert.equal(badResult.allowed, false);
+});
+
+test('identity verification: handles whitespace and empty values', () => {
+    assert.equal(verifyTokenLogin('  noemi-agent  ', 'noemi-agent').allowed, true);
+    assert.equal(verifyTokenLogin('', 'noemi-agent').allowed, false);
+});
+
+test('workflow wiring: classic token is wired through the workflow', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'calibration-watch.js'), 'utf8');
     const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'calibration-watch.yml'), 'utf8');
-    assert.match(src, /AGENT_GH_TOKEN_CLASSIC/);
-    assert.match(src, /AGENT_GH_EXPECTED_LOGIN/);
-    assert.match(src, /HTTP 404/);
     assert.match(yml, /AGENT_GH_TOKEN_CLASSIC/);
     assert.match(yml, /GH_TOKEN="\$AGENT_GH_TOKEN"/);
 });

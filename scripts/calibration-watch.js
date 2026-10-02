@@ -138,6 +138,22 @@ function repoVisible(repo) {
 }
 
 /**
+ * Verify that a resolved token login matches the expected agent login.
+ * Returns {allowed: boolean, reason: string}.
+ */
+function verifyTokenLogin(resolvedLogin, expectedLogin) {
+  const resolved = String(resolvedLogin || '').trim();
+  const expected = String(expectedLogin || 'noemi-agent').trim();
+  if (resolved !== expected) {
+    return {
+      allowed: false,
+      reason: `Token resolved to ${resolved}; expected ${expected}. Refusing to open a pull request.`,
+    };
+  }
+  return { allowed: true, reason: '' };
+}
+
+/**
  * Point GH_TOKEN at the classic PAT when the fine-grained token 404s.
  * Returns 'fine-grained' or 'classic'. Exits 2 when neither token can see
  * the repo, or when the classic token is not the expected machine user.
@@ -157,8 +173,9 @@ function adoptClassicToken(repo) {
   process.env.GH_TOKEN = classic;
   const login = gh(['api', 'user', '--jq', '.login']).trim();
   const expected = String(process.env.AGENT_GH_EXPECTED_LOGIN || 'noemi-agent').trim();
-  if (login !== expected) {
-    process.stderr.write(`✖ AGENT_GH_TOKEN_CLASSIC resolved to ${login}; expected ${expected}. Refusing to open a pull request.\n`);
+  const verification = verifyTokenLogin(login, expected);
+  if (!verification.allowed) {
+    process.stderr.write(`✖ ${verification.reason}\n`);
     process.exit(2);
   }
   if (!repoVisible(repo)) {
@@ -270,7 +287,7 @@ async function main() {
 
 module.exports = {
   parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged, REVIEWER_LOGINS,
-  isRepoNotFound, tokenAfterRepoProbe,
+  isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin,
 };
 
 if (require.main === module) {
