@@ -143,11 +143,16 @@ segments, `../` / absolute paths, and any resolved path outside the clone
 root are dropped; with a clone root, only paths that exist as files
 inside that root are kept. Structural critique always runs (headings, files, no
 skip-red-team, no leftover registry or escaping paths). `--live-critic` then calls
-Gemini Pro (ADC, same selection rule as the fleet reviewer). Pass →
-`accepted`. Fail at `planRedTeam.maxCycles` → `needs-info`. Between
-cycles B′ may drop invalid files; it never invents replacements. A
-Gemini 429/5xx is retried, then thrown so the host re-queues — it is not
-an `accepted` plan.
+Gemini Pro (ADC, same selection rule as the fleet reviewer). On a fail with
+cycles remaining, B′ writes a revision prompt and that same Gemini caller
+executes it on the plan before the next pass. A revision that does not
+change the plan, drops the skip-red-team record, or adds a path the issue
+did not name stops the cycle. Without `--live-critic`, B′ may still drop
+invalid files and re-format; it does not resubmit an unchanged draft, and
+it never invents replacements. Pass → `accepted`. Fail at
+`planRedTeam.maxCycles`, or a revision that does not change the plan →
+`needs-info`. A Gemini 429/5xx is retried, then thrown so the host
+re-queues — it is not an `accepted` plan.
 
 `--implement` prepares a Stage C envelope (`coding-loop/dispatch.js`) for
 `noemi-agent` on `develop` (then `dev`). `AGENT_GH_TOKEN` is required; the

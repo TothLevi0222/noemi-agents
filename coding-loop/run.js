@@ -24,7 +24,7 @@ const { issueFromGitHub } = require('./intake.js');
 const { completeThroughStageB, loadRouting } = require('./plan.js');
 const { assertProducerToken, openImplementationPr, prepareImplementation } = require('./dispatch.js');
 const { resolveProducerToken } = require('../scripts/agent-token.js');
-const { critiquePlanLive } = require('./critic.js');
+const { critiquePlanLive, revisePlanLive } = require('./critic.js');
 const { assertWriterKey, draftChanges } = require('./writer.js');
 const { mintGithubAppInstallationToken } = require('../scripts/github-app-token.js');
 const { scanIssueBody } = require('./scan.js');
@@ -250,6 +250,9 @@ async function main() {
     budget: gateInputs.budget,
     routing: loadRouting(repoRoot),
     critic: args.liveCritic ? critiquePlanLive : undefined,
+    revise: args.liveCritic
+      ? (plan, findings, prompt) => revisePlanLive(plan, findings, { prompt })
+      : undefined,
     profile: args.profile,
     repoRoot,
   });
@@ -298,7 +301,11 @@ async function main() {
     risks: [
       intake.mode === 'heuristic' ? 'sufficiency is heuristic until the Stage A model is wired' : null,
       plan.mode === 'heuristic' && plan.status === 'accepted' ? 'Stage B′ used the structural critic; pass --live-critic for Gemini' : null,
-      plan.status === 'needs-info' ? 'Stage B′ hit the cycle limit' : null,
+      plan.status === 'needs-info'
+        ? (Number.isInteger(plan.maxCycles) && plan.cycles < plan.maxCycles
+          ? 'Stage B′ stopped because the plan was not revised'
+          : 'Stage B′ hit the cycle limit')
+        : null,
       implementation && implementation.status === 'ready' && implementation.opened !== true
         ? 'Stage C envelope ready; pass --open-pr to draft with Grok and open as noemi-agent'
         : null,

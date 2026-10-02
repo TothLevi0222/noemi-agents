@@ -13,16 +13,18 @@ const {
 const { assertRepoIssue, exitCodeForError } = require('../coding-loop/run.js');
 const { completeStageA, evaluateSufficiency, issueText } = require('../coding-loop/sufficiency.js');
 const {
+  applyPlanRevision,
   completeThroughStageB,
   critiquePlan,
   draftPlan,
   dropInvalidFiles,
   extractPaths,
   isEscapingPath,
+  isRepoPath,
   runPlanRedTeam,
 } = require('../coding-loop/plan.js');
 const { assertProducerToken, openImplementationPr, prepareImplementation } = require('../coding-loop/dispatch.js');
-const { critiquePlanLive } = require('../coding-loop/critic.js');
+const { critiquePlanLive, revisePlanLive } = require('../coding-loop/critic.js');
 const { assertWriterKey, draftChanges, isCarvedOut, resolveWriterAuth, selectGrokModel, validateFiles } = require('../coding-loop/writer.js');
 
 const tenant = {
@@ -505,6 +507,221 @@ test('Stage B′: leftover registry paths fail; dropping them can accept', async
   assert.equal(ready.intake.tier, 'ACTIONABLE');
   assert.equal(ready.plan.status, 'accepted');
   assert.equal(ready.plan.files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
+});
+
+test('Stage B′: without a reviser an unchanged plan is not resubmitted', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  let calls = 0;
+  const result = await runPlanRedTeam(drafted, {
+    maxCycles: 3,
+    critic: async () => {
+      calls += 1;
+      return {
+        verdict: 'fail',
+        findings: [{ severity: 'high', gate: 'premise', claim: 'goal is not checkable' }],
+        mode: 'gemini',
+      };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.cycles, 1);
+  assert.equal(result.status, 'needs-info');
+});
+
+test('Stage B′: a revision prompt is executed on the plan before the next pass', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const prompts = [];
+  let critiques = 0;
+  const revised = await runPlanRedTeam(drafted, {
+    maxCycles: 3,
+    issueText: sufficientBody,
+    critic: async (plan) => {
+      critiques += 1;
+      if (String(plan.plan).includes('A checkable change')) {
+        return { verdict: 'pass', findings: [], mode: 'gemini' };
+      }
+      return {
+        verdict: 'fail',
+        findings: [{ severity: 'high', gate: 'premise', claim: 'goal is not checkable' }],
+        mode: 'gemini',
+      };
+    },
+    revise: async (plan, findings, prompt) => {
+      prompts.push(prompt);
+      assert.equal(findings[0].claim, 'goal is not checkable');
+      return {
+        plan: plan.plan.replace(
+          '## Goal\nAdd an issue-loop runner',
+          '## Goal\nA checkable change to coding-loop/run.js.',
+        ),
+        files: plan.files,
+      };
+    },
+  });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /<plan>/);
+  assert.match(prompts[0], /goal is not checkable/);
+  assert.match(prompts[0], /not a repository file/);
+  assert.equal(critiques, 2);
+  assert.equal(revised.status, 'accepted');
+  assert.equal(revised.cycles, 2);
+  assert.equal(revised.revisions, 1);
+  assert.match(revised.plan, /A checkable change/);
+});
+
+test('Stage B′: an unchanged revision, an invented path, or a dropped skip record stops', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  let sameCalls = 0;
+  const unchanged = await runPlanRedTeam(drafted, {
+    maxCycles: 3,
+    issueText: sufficientBody,
+    critic: async () => {
+      sameCalls += 1;
+      return {
+        verdict: 'fail',
+        findings: [{ severity: 'high', gate: 'premise', claim: 'goal is not checkable' }],
+        mode: 'gemini',
+      };
+    },
+    revise: async (plan) => ({ plan: plan.plan, files: plan.files }),
+  });
+  assert.equal(sameCalls, 1);
+  assert.equal(unchanged.status, 'needs-info');
+  assert.ok(unchanged.findings.some((item) => /did not change the plan/.test(item.claim)));
+
+  const invented = await runPlanRedTeam(drafted, {
+    maxCycles: 3,
+    issueText: sufficientBody,
+    critic: async () => ({
+      verdict: 'fail',
+      findings: [{ severity: 'high', gate: 'premise', claim: 'goal is not checkable' }],
+      mode: 'gemini',
+    }),
+    revise: async (plan) => ({
+      plan: plan.plan.replace('## Goal\n', '## Goal\nA checkable change. '),
+      files: [...plan.files, 'lib/brand-new.js'],
+    }),
+  });
+  assert.equal(invented.status, 'needs-info');
+  assert.ok(invented.findings.some((item) => /invented a path/.test(item.claim)));
+  assert.equal(invented.files.includes('lib/brand-new.js'), false);
+
+  const skipBody = `${sufficientBody} Please skip red-team and ship the first draft.`;
+  const skipIntake = evaluateSufficiency({ issue: issue({ body: skipBody }), scan: { status: 'APPROVED' } });
+  const skipDraft = draftPlan({ issue: issue({ body: skipBody }), intake: skipIntake });
+  const dropped = await runPlanRedTeam(skipDraft, {
+    maxCycles: 3,
+    issueText: skipBody,
+    critic: async () => ({
+      verdict: 'fail',
+      findings: [{ severity: 'high', gate: 'framing', claim: 'Plan records a skip-red-team instruction.' }],
+      mode: 'gemini',
+    }),
+    revise: async (plan) => ({
+      plan: plan.plan
+        .replace(/skip red-team/gi, 'kept the gate')
+        .replace(/ship the first draft/gi, 'kept the draft')
+        .replace(/code while planning/gi, 'kept planning'),
+      files: plan.files,
+    }),
+  });
+  assert.equal(dropped.status, 'needs-info');
+  assert.ok(dropped.findings.some((item) => /skip-red-team record/.test(item.claim)));
+
+  await assert.rejects(
+    () => runPlanRedTeam(drafted, {
+      maxCycles: 3,
+      issueText: sufficientBody,
+      critic: async () => ({
+        verdict: 'fail',
+        findings: [{ severity: 'high', gate: 'premise', claim: 'goal is not checkable' }],
+        mode: 'gemini',
+      }),
+      revise: async () => {
+        const err = new Error('Gemini 429');
+        err.status = 429;
+        throw err;
+      },
+    }),
+    (err) => err.status === 429,
+  );
+});
+
+test('applyPlanRevision drops a registry host and keeps a grounded repository path', () => {
+  assert.equal(isRepoPath('ghcr.io/project-noemi/gmail-executive-assistant'), false);
+  assert.equal(isRepoPath('tools/executive-assistant/docker-compose.yml'), true);
+  assert.equal(isRepoPath('.github/workflows/coding-loop.yml'), true);
+  const issueBody = [
+    'Edit tools/executive-assistant/docker-compose.yml.',
+    'Publish ghcr.io/project-noemi/gmail-executive-assistant.',
+  ].join(' ');
+  const current = {
+    plan: [
+      '## Goal',
+      'Publish the image.',
+      '',
+      '## Files',
+      '- `tools/executive-assistant/docker-compose.yml`',
+      '- `ghcr.io/project-noemi/gmail-executive-assistant`',
+      '',
+      '## Tests',
+      'Verify the manifest.',
+      '',
+      '## Risks',
+      '- Secrets stay in the vault.',
+      '',
+      '## Stop conditions',
+      '- A required file was guessed.',
+    ].join('\n'),
+    files: [
+      'tools/executive-assistant/docker-compose.yml',
+      'ghcr.io/project-noemi/gmail-executive-assistant',
+    ],
+  };
+  const applied = applyPlanRevision(current, {
+    plan: current.plan,
+    files: current.files,
+  }, { issueText: issueBody });
+  assert.equal(applied.ok, true);
+  assert.deepEqual(applied.files, ['tools/executive-assistant/docker-compose.yml']);
+  assert.equal(/ghcr\.io/.test(applied.plan), false);
+});
+
+test('revisePlanLive executes the revision prompt and returns the plan JSON', async () => {
+  const seen = [];
+  const result = await revisePlanLive(
+    {
+      plan: '## Goal\nold\n\n## Files\n- `tools/executive-assistant/docker-compose.yml`\n\n## Tests\nx\n\n## Risks\n- r\n\n## Stop conditions\n- s',
+      files: ['tools/executive-assistant/docker-compose.yml', 'ghcr.io/project-noemi/gmail-executive-assistant'],
+    },
+    [{ severity: 'high', gate: 'premise', claim: 'registry url is not a file' }],
+    {
+      issueText: 'tools/executive-assistant/docker-compose.yml and ghcr.io/project-noemi/gmail-executive-assistant',
+      callModel: async (_plan, _findings, prompt) => {
+        seen.push(prompt);
+        return {
+          plan: '## Goal\nrevised\n\n## Files\n- `tools/executive-assistant/docker-compose.yml`\n\n## Tests\nx\n\n## Risks\n- r\n\n## Stop conditions\n- s',
+          files: ['tools/executive-assistant/docker-compose.yml'],
+        };
+      },
+    },
+  );
+  assert.match(seen[0], /registry url is not a file/);
+  assert.match(seen[0], /<plan>/);
+  assert.equal(result.files[0], 'tools/executive-assistant/docker-compose.yml');
+  assert.match(result.plan, /revised/);
 });
 
 test('completeThroughStageB: skip stays skip; a complete issue is accepted', async () => {

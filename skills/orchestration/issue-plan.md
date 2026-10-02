@@ -35,13 +35,19 @@ from coding a rejected idea.
    is a plan critique consumed by the conductor, not a GitHub PR review.
    Verdict is `pass` or `fail`. `fail` requires at least one finding with
    severity `high` or `critical` against `docs/AI_REVIEW_GOVERNANCE.md`.
-5. **Cycle** — On `fail`, if `len(prior_cycles) + 1 < cycle_limit`, revise the
-   plan addressing the findings and repeat step 4. Revision may **drop**
-   files that are not repository paths (hostnames, URLs, `dist` /
-   `coverage` / `node_modules`, directories, `../`, absolute paths). It
-   may **not** add files the issue did not name. Increment the cycle count
-   each red-team call. An empty file list after a drop is `needs-info`
-   immediately.
+5. **Cycle** — On `fail`, if `len(prior_cycles) + 1 < cycle_limit`, write a
+   revision prompt from the findings and execute that prompt on the plan,
+   then repeat step 4. The prompt revises the plan only. It does not edit
+   code and it does not edit the issue. A revision that does not change the
+   plan, drops the skip-red-team record, or adds a path that is not a
+   repository file grounded in the issue stops the cycle. Invalid files
+   (hostnames, URLs, `dist` / `coverage` / `node_modules`, `../`, absolute
+   paths) are dropped rather than kept. With no reviser, those invalid files
+   may still be dropped and the plan re-formatted; if that does not change
+   the plan, the first fail stops. The same draft is not resubmitted.
+   Increment the cycle count on each red-team call. An empty file list is
+   `needs-info` immediately. Until Stage B has an unattended resolver,
+   `--live-critic` executes the prompt with the same Gemini Pro caller as B′.
 6. **Limit** — On `fail` at `cycle_limit`, do **not** dispatch coding. Set
    `status: needs-info`, instruct the conductor to apply `noemi:needs-info`,
    and return the unresolved findings.
