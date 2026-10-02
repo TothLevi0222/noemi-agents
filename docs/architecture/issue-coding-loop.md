@@ -87,8 +87,9 @@ Mastra remains a *candidate* later host for a durable issue webhook. It is
 not how Fable/Opus learn to drive Grok. Classman curriculum delivery is out
 of this repository's purview.
 
-The `noemi-conductor` GitHub App is still planned, not provisioned. Do not
-post conductor comments as `noemi-agent` or the reviewer.
+The `noemi-conductor` GitHub App is provisioned (App id `5066927`) and installed
+on all repositories in `newpush`, `project-noemi`, and `newpush-labs` (Decision
+[2026-09-26-0001]). Do not post conductor comments as `noemi-agent` or the reviewer.
 
 **Plug a different host** (preference order):
 
@@ -110,7 +111,7 @@ long-running webhook or Fable-with-tools. Do not adopt it to get skip/bot/scan
 
 | Stage | Identity | May do | Must not do |
 |---|---|---|---|
-| A, B, B′ comments and labels | `noemi-conductor` (planned) | Read issues, comment, apply `noemi:*` labels | Write code, open PRs, review PRs, approve, merge |
+| A, B, B′ comments and labels | `noemi-conductor` (provisioned) | Read issues, comment, apply `noemi:*` labels | Write code, open PRs, review PRs, approve, merge |
 | C — implement | `noemi-agent` | Open branches and PRs | Approve or merge |
 | D — PR red-team | `noemi-reviewer-bot[bot]` | Post review findings | Author code, approve, merge |
 | Merge | Human Accelerator | Approve and merge | Hand those acts to any machine identity |
@@ -119,7 +120,7 @@ Producer, conductor, and reviewer are three identities. Sharing the reviewer
 App with the conductor would mix issue chatter with review findings and
 collapse attribution. Sharing `noemi-agent` with the conductor would make the
 coding PR look like it was opened by the same actor that planned it. The
-conductor App is **planned, not provisioned** — see `docs/MACHINE_IDENTITY.md`.
+conductor App is **provisioned** — see `docs/MACHINE_IDENTITY.md` (Decision [2026-09-26-0001]).
 
 ## Pickup
 
@@ -318,7 +319,7 @@ metering are schema fields, not implemented product.
 ## Out of scope for this spec
 
 - Stripe, invoices, customer self-serve key UI
-- Provisioning the `noemi-conductor` GitHub App
+- Re-provisioning the `noemi-conductor` GitHub App (installed; Decision [2026-09-26-0001])
 - Auto-merge of coding PRs
 - A second Gemini reviewer beside `noemi-reviewer-bot`
 - Acting on issues in customer orgs we do not operate
