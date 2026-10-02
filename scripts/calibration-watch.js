@@ -127,9 +127,9 @@ function tokenAfterRepoProbe({ visible, hasClassic }) {
   return 'fail';
 }
 
-function repoVisible(repo) {
+function repoVisible(repo, call = gh) {
   try {
-    gh(['api', `repos/${repo}`, '--jq', '.id']);
+    call(['api', `repos/${repo}`, '--jq', '.id']);
     return true;
   } catch (err) {
     if (isRepoNotFound(err)) return false;
@@ -157,32 +157,45 @@ function verifyTokenLogin(resolvedLogin, expectedLogin) {
  * Point GH_TOKEN at the classic PAT when the fine-grained token 404s.
  * Returns 'fine-grained' or 'classic'. Exits 2 when neither token can see
  * the repo, or when the classic token is not the expected machine user.
+ *
+ * `io` is the test seam. Production calls use process env, real `gh`, and
+ * process.exit. A refused login returns after exit so a stubbed exit cannot
+ * fall through into opening a pull request.
  */
-function adoptClassicToken(repo) {
-  const classic = process.env.AGENT_GH_TOKEN_CLASSIC || '';
-  const choice = tokenAfterRepoProbe({ visible: repoVisible(repo), hasClassic: classic.length > 0 });
+function adoptClassicToken(repo, io = {}) {
+  const call = io.gh || gh;
+  const env = io.env || process.env;
+  const exit = io.exit || ((code) => process.exit(code));
+  const write = io.write || ((msg) => process.stderr.write(msg));
+
+  const classic = env.AGENT_GH_TOKEN_CLASSIC || '';
+  const choice = tokenAfterRepoProbe({ visible: repoVisible(repo, call), hasClassic: classic.length > 0 });
   if (choice === 'keep') return 'fine-grained';
   if (choice === 'fail') {
-    process.stderr.write(`✖ Fine-grained token cannot see ${repo} (HTTP 404) and AGENT_GH_TOKEN_CLASSIC is unset.\n`);
-    process.exit(2);
+    write(`✖ Fine-grained token cannot see ${repo} (HTTP 404) and AGENT_GH_TOKEN_CLASSIC is unset.\n`);
+    exit(2);
+    return;
   }
-  if (process.env.GH_TOKEN === classic) {
-    process.stderr.write(`✖ Token cannot see ${repo} (HTTP 404).\n`);
-    process.exit(2);
+  if (env.GH_TOKEN === classic) {
+    write(`✖ Token cannot see ${repo} (HTTP 404).\n`);
+    exit(2);
+    return;
   }
-  process.env.GH_TOKEN = classic;
-  const login = gh(['api', 'user', '--jq', '.login']).trim();
-  const expected = String(process.env.AGENT_GH_EXPECTED_LOGIN || 'noemi-agent').trim();
+  env.GH_TOKEN = classic;
+  const login = call(['api', 'user', '--jq', '.login']).trim();
+  const expected = String(env.AGENT_GH_EXPECTED_LOGIN || 'noemi-agent').trim();
   const verification = verifyTokenLogin(login, expected);
   if (!verification.allowed) {
-    process.stderr.write(`✖ ${verification.reason}\n`);
-    process.exit(2);
+    write(`✖ ${verification.reason}\n`);
+    exit(2);
+    return;
   }
-  if (!repoVisible(repo)) {
-    process.stderr.write(`✖ AGENT_GH_TOKEN_CLASSIC also cannot see ${repo} (HTTP 404).\n`);
-    process.exit(2);
+  if (!repoVisible(repo, call)) {
+    write(`✖ AGENT_GH_TOKEN_CLASSIC also cannot see ${repo} (HTTP 404).\n`);
+    exit(2);
+    return;
   }
-  process.stderr.write(`Fine-grained token cannot see ${repo}; using AGENT_GH_TOKEN_CLASSIC as ${login}.\n`);
+  write(`Fine-grained token cannot see ${repo}; using AGENT_GH_TOKEN_CLASSIC as ${login}.\n`);
   return 'classic';
 }
 
@@ -287,7 +300,7 @@ async function main() {
 
 module.exports = {
   parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged, REVIEWER_LOGINS,
-  isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin,
+  isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin, adoptClassicToken,
 };
 
 if (require.main === module) {

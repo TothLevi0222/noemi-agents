@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
     parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged,
-    isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin,
+    isRepoNotFound, tokenAfterRepoProbe, verifyTokenLogin, adoptClassicToken,
 } = require('../scripts/calibration-watch.js');
 
 // Real comment shapes from renderComment() in scripts/review-pr.js.
@@ -143,6 +143,64 @@ test('identity verification: defaults to noemi-agent when expected is empty', ()
 test('identity verification: handles whitespace and empty values', () => {
     assert.equal(verifyTokenLogin('  noemi-agent  ', 'noemi-agent').allowed, true);
     assert.equal(verifyTokenLogin('', 'noemi-agent').allowed, false);
+});
+
+function hiddenRepo() {
+    const err = new Error('Command failed: gh api repos/owner/repo');
+    err.stderr = 'gh: Not Found (HTTP 404)\n';
+    return err;
+}
+
+/** Each call consumes one scripted gh response. An Error is thrown. */
+function scriptedGh(responses) {
+    const calls = [];
+    const gh = (args) => {
+        calls.push(args.join(' '));
+        if (responses.length === 0) throw new Error(`unexpected gh call: ${args.join(' ')}`);
+        const next = responses.shift();
+        if (next instanceof Error) throw next;
+        return next;
+    };
+    return { gh, calls };
+}
+
+test('adoptClassicToken keeps the fine-grained token when the repo is visible', () => {
+    const { gh, calls } = scriptedGh(['42\n']);
+    const env = { GH_TOKEN: 'fine', AGENT_GH_TOKEN_CLASSIC: 'classic' };
+    const result = adoptClassicToken('project-noemi/agents', {
+        gh, env, exit: () => { throw new Error('exit'); }, write: () => {},
+    });
+    assert.equal(result, 'fine-grained');
+    assert.equal(env.GH_TOKEN, 'fine');
+    assert.equal(calls.length, 1);
+});
+
+test('adoptClassicToken adopts classic only after verifyTokenLogin accepts the login', () => {
+    const { gh, calls } = scriptedGh([hiddenRepo(), 'noemi-agent\n', '99\n']);
+    const env = { GH_TOKEN: 'fine', AGENT_GH_TOKEN_CLASSIC: 'classic' };
+    const logs = [];
+    const result = adoptClassicToken('newpush/newpush-agents', {
+        gh, env, exit: () => { throw new Error('exit'); }, write: (msg) => logs.push(msg),
+    });
+    assert.equal(result, 'classic');
+    assert.equal(env.GH_TOKEN, 'classic');
+    assert.ok(calls.some((call) => call.includes('api user')));
+    assert.match(logs.join(''), /using AGENT_GH_TOKEN_CLASSIC as noemi-agent/);
+});
+
+test('adoptClassicToken refuses a non-agent login and does not continue', () => {
+    const { gh, calls } = scriptedGh([hiddenRepo(), 'WSwarm\n', '99\n']);
+    const env = { GH_TOKEN: 'fine', AGENT_GH_TOKEN_CLASSIC: 'classic', AGENT_GH_EXPECTED_LOGIN: 'noemi-agent' };
+    const exits = [];
+    const logs = [];
+    const result = adoptClassicToken('newpush/newpush-agents', {
+        gh, env, exit: (code) => exits.push(code), write: (msg) => logs.push(msg),
+    });
+    assert.deepEqual(exits, [2]);
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 2, 'a refused login must not probe the repo again');
+    assert.match(logs.join(''), /WSwarm/);
+    assert.match(logs.join(''), /Refusing to open a pull request/);
 });
 
 test('workflow wiring: classic token is wired through the workflow', () => {
