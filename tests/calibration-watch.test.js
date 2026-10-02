@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
     parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged,
+    isRepoNotFound, tokenAfterRepoProbe,
 } = require('../scripts/calibration-watch.js');
 
 // Real comment shapes from renderComment() in scripts/review-pr.js.
@@ -102,4 +103,30 @@ test('recursion guard: entry branches are exempt from generating entries', () =>
     const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'calibration-watch.js'), 'utf8');
     assert.match(src, /startsWith\('calibration\/'\)/, 'guard must key on the entry branch prefix');
     assert.match(src, /`calibration\/pr-\$\{prNumber\}`/, 'entry branches must carry that prefix');
+});
+
+test('a visible repo keeps the fine-grained token; a 404 falls back to classic', () => {
+    assert.equal(tokenAfterRepoProbe({ visible: true, hasClassic: true }), 'keep');
+    assert.equal(tokenAfterRepoProbe({ visible: true, hasClassic: false }), 'keep');
+    assert.equal(tokenAfterRepoProbe({ visible: false, hasClassic: true }), 'classic');
+    assert.equal(tokenAfterRepoProbe({ visible: false, hasClassic: false }), 'fail');
+});
+
+test('only an HTTP 404 counts as the repo being hidden from this token', () => {
+    const notFound = Object.assign(new Error('Command failed'), { stderr: 'gh: Not Found (HTTP 404)\n' });
+    assert.equal(isRepoNotFound(notFound), true);
+    const forbidden = Object.assign(new Error('Command failed'), { stderr: 'gh: Resource not accessible by integration (HTTP 403)\n' });
+    assert.equal(isRepoNotFound(forbidden), false);
+});
+
+test('the watch pins the classic fallback and still refuses a non-agent login', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'calibration-watch.js'), 'utf8');
+    const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'calibration-watch.yml'), 'utf8');
+    assert.match(src, /AGENT_GH_TOKEN_CLASSIC/);
+    assert.match(src, /AGENT_GH_EXPECTED_LOGIN/);
+    assert.match(src, /HTTP 404/);
+    assert.match(yml, /AGENT_GH_TOKEN_CLASSIC/);
+    assert.match(yml, /GH_TOKEN="\$AGENT_GH_TOKEN"/);
 });

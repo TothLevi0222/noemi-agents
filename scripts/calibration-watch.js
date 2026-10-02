@@ -28,7 +28,11 @@
  * USAGE (normally invoked by .github/workflows/calibration-watch.yml)
  *   PR_NUMBER=392 GITHUB_REPOSITORY=owner/repo node scripts/calibration-watch.js
  *   Requires a token able to push a branch and open a PR (the noemi-agent
- *   credential, AGENT_GH_TOKEN, resolved via `infisical run`).
+ *   credential, AGENT_GH_TOKEN, resolved via `infisical run`). A fine-grained
+ *   token that cannot see the repository (HTTP 404) falls back to
+ *   AGENT_GH_TOKEN_CLASSIC, still as noemi-agent. The other direction is
+ *   refused: a requested classic path never falls back to AGENT_GH_TOKEN
+ *   (Decision [2026-09-24-0002]).
  *
  * EXIT CODES
  *   0 nothing to log (clean verdict, halt, dedup) or entry PR opened
@@ -106,6 +110,65 @@ function gh(args, input) {
   });
 }
 
+/** gh reports a hidden or missing repo as "Not Found (HTTP 404)". */
+function isRepoNotFound(err) {
+  const stderr = err && err.stderr ? String(err.stderr) : '';
+  const message = err && err.message ? String(err.message) : '';
+  return /HTTP 404\b/.test(`${stderr}\n${message}`);
+}
+
+/**
+ * Fine-grained PAT stays the default. Classic is only the fallback when that
+ * token cannot see the repository. 'fail' means classic is unset.
+ */
+function tokenAfterRepoProbe({ visible, hasClassic }) {
+  if (visible) return 'keep';
+  if (hasClassic) return 'classic';
+  return 'fail';
+}
+
+function repoVisible(repo) {
+  try {
+    gh(['api', `repos/${repo}`, '--jq', '.id']);
+    return true;
+  } catch (err) {
+    if (isRepoNotFound(err)) return false;
+    throw err;
+  }
+}
+
+/**
+ * Point GH_TOKEN at the classic PAT when the fine-grained token 404s.
+ * Returns 'fine-grained' or 'classic'. Exits 2 when neither token can see
+ * the repo, or when the classic token is not the expected machine user.
+ */
+function adoptClassicToken(repo) {
+  const classic = process.env.AGENT_GH_TOKEN_CLASSIC || '';
+  const choice = tokenAfterRepoProbe({ visible: repoVisible(repo), hasClassic: classic.length > 0 });
+  if (choice === 'keep') return 'fine-grained';
+  if (choice === 'fail') {
+    process.stderr.write(`✖ Fine-grained token cannot see ${repo} (HTTP 404) and AGENT_GH_TOKEN_CLASSIC is unset.\n`);
+    process.exit(2);
+  }
+  if (process.env.GH_TOKEN === classic) {
+    process.stderr.write(`✖ Token cannot see ${repo} (HTTP 404).\n`);
+    process.exit(2);
+  }
+  process.env.GH_TOKEN = classic;
+  const login = gh(['api', 'user', '--jq', '.login']).trim();
+  const expected = String(process.env.AGENT_GH_EXPECTED_LOGIN || 'noemi-agent').trim();
+  if (login !== expected) {
+    process.stderr.write(`✖ AGENT_GH_TOKEN_CLASSIC resolved to ${login}; expected ${expected}. Refusing to open a pull request.\n`);
+    process.exit(2);
+  }
+  if (!repoVisible(repo)) {
+    process.stderr.write(`✖ AGENT_GH_TOKEN_CLASSIC also cannot see ${repo} (HTTP 404).\n`);
+    process.exit(2);
+  }
+  process.stderr.write(`Fine-grained token cannot see ${repo}; using AGENT_GH_TOKEN_CLASSIC as ${login}.\n`);
+  return 'classic';
+}
+
 async function main() {
   const repo = process.env.GITHUB_REPOSITORY;
   const prNumber = Number(process.env.PR_NUMBER);
@@ -113,6 +176,8 @@ async function main() {
     process.stderr.write('✖ Need GITHUB_REPOSITORY and PR_NUMBER.\n');
     process.exit(2);
   }
+
+  const tokenSource = adoptClassicToken(repo);
 
   const pr = JSON.parse(gh(['api', `repos/${repo}/pulls/${prNumber}`]));
   if (!pr.merged_at) {
@@ -196,7 +261,7 @@ async function main() {
 
   process.stderr.write(`${JSON.stringify({
     task: 'Calibration auto-log',
-    inputs: [`pr=#${prNumber}`, `gates=${verdict.gates.join('+')}`, `model=${verdict.model}`],
+    inputs: [`pr=#${prNumber}`, `gates=${verdict.gates.join('+')}`, `model=${verdict.model}`, `token=${tokenSource}`],
     actions: ['detected merge over failing verdict', 'opened calibration entry PR'],
     risks: ['entry awaits human Direction/Reason before it counts as evidence'],
     result: `calibration/pr-${prNumber} opened`,
@@ -205,6 +270,7 @@ async function main() {
 
 module.exports = {
   parseReviewVerdict, latestVerdict, buildCalibrationRow, alreadyLogged, REVIEWER_LOGINS,
+  isRepoNotFound, tokenAfterRepoProbe,
 };
 
 if (require.main === module) {
