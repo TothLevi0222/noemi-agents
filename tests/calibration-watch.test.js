@@ -203,10 +203,13 @@ test('adoptClassicToken refuses a non-agent login and does not continue', () => 
     assert.match(logs.join(''), /Refusing to open a pull request/);
 });
 
-test('workflow wiring: classic token is wired through the workflow', () => {
+test('workflow wiring: the run step passes both producer tokens into the watch', () => {
     const fs = require('fs');
     const path = require('path');
     const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'calibration-watch.yml'), 'utf8');
-    assert.match(yml, /AGENT_GH_TOKEN_CLASSIC/);
-    assert.match(yml, /GH_TOKEN="\$AGENT_GH_TOKEN"/);
+    const executable = yml.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+    assert.match(executable, /infisical run --projectId="\$INFISICAL_PROJECT_ID" --env=dev --/);
+    assert.match(executable, /GH_TOKEN="\$AGENT_GH_TOKEN"/);
+    assert.match(executable, /AGENT_GH_TOKEN_CLASSIC="\$AGENT_GH_TOKEN_CLASSIC"/);
+    assert.match(executable, /node scripts\/calibration-watch\.js/);
 });
