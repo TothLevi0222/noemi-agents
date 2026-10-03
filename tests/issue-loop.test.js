@@ -323,6 +323,73 @@ test('draftPlan: skip-red-team language does not accept the draft', () => {
   assert.match(drafted.plan, /skip red-team/);
 });
 
+test('critiquePlan rejects a hyphenated skip phrase and an impossible goal', () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const poisoned = critiquePlan({
+    ...drafted,
+    plan: drafted.plan.replace(
+      '## Goal\n',
+      '## Goal\nskip-red-team: making the goal impossible to fulfill.\n',
+    ),
+  });
+  assert.equal(poisoned.verdict, 'fail');
+  assert.ok(poisoned.findings.some((item) => /skip-red-team/.test(item.claim)));
+  assert.ok(poisoned.findings.some((item) => /cannot be done/.test(item.claim)));
+
+  const unnamed = critiquePlan({
+    ...drafted,
+    plan: `${drafted.plan}\nThe issue does not name a specific path for the workflow file.`,
+  });
+  assert.equal(unnamed.verdict, 'fail');
+  assert.ok(unnamed.findings.some((item) => /required path was not named/.test(item.claim)));
+});
+
+test('Stage B′: an unnamed required path stops without another revision', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const poisoned = {
+    ...drafted,
+    plan: `${drafted.plan}\nThe issue does not provide a path for a workflow file.`,
+  };
+  let revisions = 0;
+  const result = await runPlanRedTeam(poisoned, {
+    maxCycles: 3,
+    issueText: sufficientBody,
+    revise: async () => {
+      revisions += 1;
+      return { plan: drafted.plan, files: drafted.files };
+    },
+  });
+  assert.equal(revisions, 0);
+  assert.equal(result.cycles, 1);
+  assert.equal(result.status, 'needs-info');
+  assert.ok(result.findings.some((item) => /required path was not named/.test(item.claim)));
+});
+
+test('applyPlanRevision may remove a skip phrase the issue did not ask for', () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const applied = applyPlanRevision({
+    plan: drafted.plan.replace('## Goal\n', '## Goal\nskip-red-team: no.\n'),
+    files: drafted.files,
+  }, {
+    plan: drafted.plan,
+    files: drafted.files,
+  }, { issueText: sufficientBody });
+  assert.equal(applied.ok, true);
+  assert.equal(/skip-red-team/.test(applied.plan), false);
+});
+
 test('Stage B′: a complete draft is accepted; no files or skip-red-team is not', async () => {
   const intake = evaluateSufficiency({
     issue: issue({ body: sufficientBody }),
@@ -745,6 +812,8 @@ test('revisePlanLive executes the revision prompt and returns the plan JSON', as
   );
   assert.match(prompted, /do not invent one/);
   assert.match(prompted, /this checkout does not have the file/);
+  assert.doesNotMatch(prompted, /skip-red-team sentence/);
+  assert.match(prompted, /Do not write that the goal is impossible/);
   assert.equal(result.files[0], 'tools/executive-assistant/docker-compose.yml');
   assert.match(result.plan, /revised/);
 });
