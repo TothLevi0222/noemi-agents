@@ -42,8 +42,11 @@ from coding a rejected idea.
    plan, drops the skip-red-team record, or adds a path that is not a
    repository file grounded in the issue stops the cycle. Invalid files
    (hostnames, URLs, `dist` / `coverage` / `node_modules`, `../`, absolute
-   paths) are dropped rather than kept. With no reviser, those invalid files
-   may still be dropped and the plan re-formatted; if that does not change
+   paths, directories) are dropped rather than kept. A source file the issue
+   names stays even when this checkout does not contain it. When a finding
+   asks for a path the issue does not name, the revision records that gap
+   under Stop conditions and does not invent the path. With no reviser, invalid
+   files may still be dropped and the plan re-formatted; if that does not change
    the plan, the first fail stops. The same draft is not resubmitted.
    Increment the cycle count on each red-team call. An empty file list is
    `needs-info` immediately. Until Stage B has an unattended resolver,

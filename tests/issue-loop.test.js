@@ -14,6 +14,7 @@ const { assertRepoIssue, exitCodeForError } = require('../coding-loop/run.js');
 const { completeStageA, evaluateSufficiency, issueText } = require('../coding-loop/sufficiency.js');
 const {
   applyPlanRevision,
+  buildPlanRevisionPrompt,
   completeThroughStageB,
   critiquePlan,
   draftPlan,
@@ -383,6 +384,9 @@ test('extractPaths: registry URLs and build artifacts are not plan files', () =>
   const files = extractPaths(issue187Body, repoRoot);
   assert.ok(files.includes('tools/executive-assistant/docker-compose.yml'));
   assert.ok(files.includes('tools/executive-assistant/Dockerfile'));
+  assert.ok(files.includes('tools/executive-assistant/README.md'));
+  assert.ok(files.includes('tools/executive-assistant/CLARIFICATIONS.md'));
+  assert.ok(files.includes('docs/tool-usages/gmail-ea-runbook.md'));
   assert.equal(files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
   assert.equal(files.includes('UI/dist'), false);
   assert.equal(files.includes('examples/gatekeeper-deployment'), false);
@@ -470,6 +474,8 @@ test('draftPlan: Goal is the title; Tests copy Done when; Files omit registry UR
   assert.match(drafted.tests, /Done when|docker manifest inspect|npm run smoke/i);
   assert.equal(drafted.files.includes('ghcr.io/project-noemi/gmail-executive-assistant'), false);
   assert.ok(drafted.files.includes('tools/executive-assistant/docker-compose.yml'));
+  assert.ok(drafted.files.includes('tools/executive-assistant/README.md'));
+  assert.ok(drafted.files.includes('docs/tool-usages/gmail-ea-runbook.md'));
 });
 
 test('Stage B′: leftover registry paths fail; dropping them can accept', async () => {
@@ -697,6 +703,17 @@ test('applyPlanRevision drops a registry host and keeps a grounded repository pa
   assert.equal(applied.ok, true);
   assert.deepEqual(applied.files, ['tools/executive-assistant/docker-compose.yml']);
   assert.equal(/ghcr\.io/.test(applied.plan), false);
+
+  const withMissingDoc = applyPlanRevision(current, {
+    plan: current.plan.replace(
+      '## Files\n- `tools/executive-assistant/docker-compose.yml`',
+      '## Files\n- `tools/executive-assistant/docker-compose.yml`\n- `tools/executive-assistant/README.md`',
+    ),
+    files: [...current.files, 'tools/executive-assistant/README.md', 'examples/gatekeeper-deployment'],
+  }, { issueText: `${issueBody} tools/executive-assistant/README.md examples/gatekeeper-deployment`, repoRoot });
+  assert.equal(withMissingDoc.ok, true);
+  assert.ok(withMissingDoc.files.includes('tools/executive-assistant/README.md'));
+  assert.equal(withMissingDoc.files.includes('examples/gatekeeper-deployment'), false);
 });
 
 test('revisePlanLive executes the revision prompt and returns the plan JSON', async () => {
@@ -720,6 +737,14 @@ test('revisePlanLive executes the revision prompt and returns the plan JSON', as
   );
   assert.match(seen[0], /registry url is not a file/);
   assert.match(seen[0], /<plan>/);
+  assert.match(seen[0], /Record that gap under ## Stop conditions/);
+  const prompted = buildPlanRevisionPrompt(
+    { plan: '## Goal\nG\n\n## Files\n- `a/b.js`\n\n## Tests\nT\n\n## Risks\n- r\n\n## Stop conditions\n- s', files: ['a/b.js'] },
+    [{ claim: 'missing workflow' }],
+    'edit a/b.js only',
+  );
+  assert.match(prompted, /do not invent one/);
+  assert.match(prompted, /this checkout does not have the file/);
   assert.equal(result.files[0], 'tools/executive-assistant/docker-compose.yml');
   assert.match(result.plan, /revised/);
 });

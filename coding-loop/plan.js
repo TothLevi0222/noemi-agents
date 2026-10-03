@@ -11,7 +11,10 @@
  * Plan files are a filtered subset of PATH_RE hits: hostnames, URLs,
  * build-artifact segments, leftover `..` segments, POSIX-absolute and
  * Windows drive-letter paths, and resolved paths outside repoRoot are
- * dropped. B′ may drop invalid files between cycles;
+ * dropped. A source file the issue names is kept even when this checkout
+ * does not contain it: the loop repo is not the target repo
+ * (Decision [2026-10-03-0001], refining [2026-10-02-0002]).
+ * B′ may drop invalid files between cycles;
  * it never adds paths the issue did not name
  * (Decision [2026-10-02-0002], refining [2026-08-18-0006]).
  *
@@ -68,12 +71,18 @@ function isJunkPath(filePath) {
   return false;
 }
 
-function existsAsFile(repoRoot, filePath) {
-  if (!repoRoot || isEscapingPath(filePath)) return false;
+function resolvedInsideRoot(repoRoot, filePath) {
+  if (!repoRoot || isEscapingPath(filePath)) return '';
   const root = path.resolve(repoRoot);
   const resolved = path.resolve(root, normalizePlanPath(filePath));
   const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  if (resolved !== root && !resolved.startsWith(prefix)) return false;
+  if (resolved !== root && !resolved.startsWith(prefix)) return '';
+  return resolved;
+}
+
+function existsAsFile(repoRoot, filePath) {
+  const resolved = resolvedInsideRoot(repoRoot, filePath);
+  if (!resolved) return false;
   try {
     return fs.statSync(resolved).isFile();
   } catch {
@@ -81,10 +90,24 @@ function existsAsFile(repoRoot, filePath) {
   }
 }
 
+function existsAsDirectory(repoRoot, filePath) {
+  const resolved = resolvedInsideRoot(repoRoot, filePath);
+  if (!resolved) return false;
+  try {
+    return fs.statSync(resolved).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function isPlanFile(filePath, repoRoot) {
   if (isJunkPath(filePath)) return false;
+  // A directory in this checkout is not a plan file. A source path the issue
+  // names still is, even when the file lives only in the target repo.
+  if (repoRoot && existsAsDirectory(repoRoot, filePath)) return false;
+  if (looksLikeSourceFile(filePath)) return true;
   if (repoRoot) return existsAsFile(repoRoot, filePath);
-  return looksLikeSourceFile(filePath);
+  return false;
 }
 
 function isInvalidPlanFile(filePath) {
@@ -312,6 +335,8 @@ function buildPlanRevisionPrompt(plan, findings, issueBody) {
     'You are revising an implementation PLAN so it can be red-teamed again.',
     'Apply the findings to the plan. Do not implement the change, write code, or open a pull request.',
     'Do not add a path that is not already in the issue text or the current file list.',
+    'When a finding says Files is missing a path, add that path if the issue text already contains it. A source file the issue names stays even when this checkout does not have the file.',
+    'When a finding asks for a path the issue does not name, do not invent one. Record that gap under ## Stop conditions and leave Files unchanged for that path.',
     'A registry URL or hostname is not a repository file. Remove it from Files.',
     'Keep these headings: ## Goal, ## Files, ## Tests, ## Risks, ## Stop conditions.',
     'If the plan records a skip-red-team sentence, keep that sentence.',
@@ -348,14 +373,23 @@ function applyPlanRevision(current, revised, { issueText: issueBody = '', repoRo
   const currentFiles = Array.isArray(current && current.files) ? current.files : [];
   const issue = String(issueBody || '');
   const surviving = [];
+  const dropped = [];
   for (const file of proposed) {
-    if (!isRepoPath(file)) continue;
+    if (!isRepoPath(file) || (repoRoot && existsAsDirectory(repoRoot, file))) {
+      dropped.push(file);
+      continue;
+    }
     const known = currentFiles.includes(file);
     const grounded = issue.includes(file);
     if (!known && !grounded) {
       return { ok: false, finding: premiseFinding(`Revision invented a path that is not in the issue: ${file}.`) };
     }
-    if (repoRoot && !known && !existsAsFile(repoRoot, file)) continue;
+    // Named source files stay. This checkout is the loop repo, not the target.
+    const keep = known || looksLikeSourceFile(file) || (repoRoot && existsAsFile(repoRoot, file));
+    if (!keep) {
+      dropped.push(file);
+      continue;
+    }
     if (!surviving.includes(file)) surviving.push(file);
   }
   if (surviving.length === 0) {
@@ -364,7 +398,8 @@ function applyPlanRevision(current, revised, { issueText: issueBody = '', repoRo
   const rewritten = rewriteFilesSection(revised.plan, surviving).trim();
   const before = rewriteFilesSection(current && current.plan ? current.plan : '', currentFiles).trim();
   if (rewritten === before && surviving.join('\n') === currentFiles.join('\n')) {
-    return { ok: false, finding: premiseFinding('Revision did not change the plan.') };
+    const suffix = dropped.length ? ` Dropped: ${dropped.join(', ')}.` : '';
+    return { ok: false, finding: premiseFinding(`Revision did not change the plan.${suffix}`) };
   }
   return { ok: true, plan: rewritten, files: surviving };
 }

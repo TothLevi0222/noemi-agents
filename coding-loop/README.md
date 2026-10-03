@@ -139,9 +139,10 @@ is not implied by leaving `--scan-status` off.
 An `ACTIONABLE` issue gets a Stage B plan and Stage B′
 (`coding-loop/plan.js`). Plan **Files** are PATH_RE hits that look like
 repository files: hostnames (`ghcr.io/…`), URLs, `dist` / `coverage`
-segments, `../` / absolute paths, and any resolved path outside the clone
-root are dropped; with a clone root, only paths that exist as files
-inside that root are kept. Structural critique always runs (headings, files, no
+segments, `../` / absolute paths, and directories are dropped. A source
+file the issue names is kept even when this checkout does not contain it,
+because this repo is the loop blueprint and the issue may target another
+clone. Other paths are kept only when they exist as files inside the clone. Structural critique always runs (headings, files, no
 skip-red-team, no leftover registry or escaping paths). `--live-critic` then calls
 Gemini Pro (ADC, same selection rule as the fleet reviewer). On a fail with
 cycles remaining, B′ writes a revision prompt and that same Gemini caller
