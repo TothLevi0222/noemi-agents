@@ -195,7 +195,10 @@ attacks the plan, not the future diff. Verdicts:
   The host executes that prompt on the plan (not on the code, and not on the
   issue), then repeats B′. A revision that does not change the plan, drops
   the skip-red-team record, or adds a path that is not a repository file
-  grounded in the issue stops the cycle. With no reviser, invalid files may
+  grounded in the issue stops the cycle. A source file the issue names stays
+  even when this checkout does not contain it. A finding that asks for a path
+  the issue does not name is recorded under Stop conditions; the revision does
+  not invent that path. With no reviser, invalid files may
   still be dropped and the plan re-formatted; an unchanged plan stops. The
   same draft is not resubmitted. Until Stage B has an unattended resolver,
   `--live-critic` executes the prompt with the same Gemini Pro caller as B′.
