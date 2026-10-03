@@ -157,8 +157,8 @@ GitHub issue opened
                 ▼
   Stage B′  Gemini Pro family      red-team the plan
         │
-        ├─ fail, cycles < max → revise plan, repeat B′
-        ├─ fail, cycles = max → noemi:needs-info, STOP
+        ├─ fail, cycles remain → revision prompt on the plan, repeat B′
+        ├─ unchanged plan or cycles = max → noemi:needs-info, STOP
         └─ pass
                 ▼
   Stage C   Grok latest family     implement as noemi-agent → branch + PR
@@ -191,9 +191,18 @@ The red-team family (Gemini Pro, same selection rule as the fleet reviewer)
 attacks the plan, not the future diff. Verdicts:
 
 - **pass** — proceed to Stage C
-- **fail** and `cycle < planRedTeam.maxCycles` — conductor revises the plan
-  (Stage B model family) and repeats B′
-- **fail** and `cycle == maxCycles` — apply `noemi:needs-info`, comment the
+- **fail** and cycles remain — B′ writes a revision prompt from the findings.
+  The host executes that prompt on the plan (not on the code, and not on the
+  issue), then repeats B′. A revision that does not change the plan, drops
+  the skip-red-team record, or adds a path that is not a repository file
+  grounded in the issue stops the cycle. A source file the issue names stays
+  even when this checkout does not contain it. A finding that asks for a path
+  the issue does not name is recorded under Stop conditions; the revision does
+  not invent that path. With no reviser, invalid files may
+  still be dropped and the plan re-formatted; an unchanged plan stops. The
+  same draft is not resubmitted. Until Stage B has an unattended resolver,
+  `--live-critic` executes the prompt with the same Gemini Pro caller as B′.
+- **fail** at `planRedTeam.maxCycles` — apply `noemi:needs-info`, comment the
   unresolved findings, **stop**. Never start Stage C on a rejected plan.
 
 Default `maxCycles` is 3 (`docs/model-routing.json` → `planRedTeam`).

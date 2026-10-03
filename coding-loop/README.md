@@ -137,11 +137,23 @@ Omitting both `--scan` and `--scan-status` is REFUSED (fail closed). `--scan`
 is not implied by leaving `--scan-status` off.
 
 An `ACTIONABLE` issue gets a Stage B plan and Stage B′
-(`coding-loop/plan.js`). Structural critique always runs (headings, files,
-no skip-red-team). `--live-critic` then calls Gemini Pro (ADC, same
-selection rule as the fleet reviewer). Pass → `accepted`. Fail at
-`planRedTeam.maxCycles` → `needs-info`. A Gemini 429/5xx is retried, then
-thrown so the host re-queues — it is not an `accepted` plan.
+(`coding-loop/plan.js`). Plan **Files** are PATH_RE hits that look like
+repository files: hostnames (`ghcr.io/…`), URLs, `dist` / `coverage`
+segments, `../` / absolute paths, and directories are dropped. A source
+file the issue names is kept even when this checkout does not contain it,
+because this repo is the loop blueprint and the issue may target another
+clone. Other paths are kept only when they exist as files inside the clone. Structural critique always runs (headings, files, no
+skip-red-team, no leftover registry or escaping paths). `--live-critic` then calls
+Gemini Pro (ADC, same selection rule as the fleet reviewer). On a fail with
+cycles remaining, B′ writes a revision prompt and that same Gemini caller
+executes it on the plan before the next pass. A revision that does not
+change the plan, drops the skip-red-team record, or adds a path the issue
+did not name stops the cycle. Without `--live-critic`, B′ may still drop
+invalid files and re-format; it does not resubmit an unchanged draft, and
+it never invents replacements. Pass → `accepted`. Fail at
+`planRedTeam.maxCycles`, or a revision that does not change the plan →
+`needs-info`. A Gemini 429/5xx is retried, then thrown so the host
+re-queues — it is not an `accepted` plan.
 
 `--implement` prepares a Stage C envelope (`coding-loop/dispatch.js`) for
 `noemi-agent` on `develop` (then `dev`). `AGENT_GH_TOKEN` is required; the
