@@ -26,7 +26,9 @@ const {
 } = require('../coding-loop/plan.js');
 const { assertProducerToken, openImplementationPr, prepareImplementation } = require('../coding-loop/dispatch.js');
 const { critiquePlanLive, revisePlanLive } = require('../coding-loop/critic.js');
-const { assertWriterKey, draftChanges, isCarvedOut, resolveWriterAuth, selectGrokModel, validateFiles } = require('../coding-loop/writer.js');
+const {
+  assertWriterKey, draftChanges, grokMessageText, isCarvedOut, parseJsonObject, resolveWriterAuth, selectGrokModel, validateFiles,
+} = require('../coding-loop/writer.js');
 
 const tenant = {
   tenantId: 'newpush-internal',
@@ -1121,6 +1123,19 @@ test('critiquePlanLive: 503 after retry is not a plan verdict', async () => {
   assert.ok(calls >= 2, 'transient critic errors must retry');
   if (prev === undefined) delete process.env.MODEL_RETRY_BASE_MS;
   else process.env.MODEL_RETRY_BASE_MS = prev;
+});
+
+test('writer JSON: fences parse; reasoning_content is not the answer', () => {
+  assert.deepEqual(parseJsonObject('```json\n{"summary":"ok","files":[]}\n```'), { summary: 'ok', files: [] });
+  assert.equal(
+    grokMessageText({ content: '', reasoning_content: '{"summary":"from-reasoning","files":[]}' }),
+    '',
+  );
+  assert.equal(
+    grokMessageText({ content: '{"summary":"visible"}', reasoning_content: '{"summary":"discarded"}' }),
+    '{"summary":"visible"}',
+  );
+  assert.throws(() => parseJsonObject('no braces here'), (err) => err.status === 502 && /unparseable JSON/.test(err.message));
 });
 
 test('selectGrokModel: highest preview then stable; missing pin fails closed', () => {

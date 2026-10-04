@@ -153,16 +153,27 @@ function validateFiles(files, plan, profile) {
 }
 
 function parseJsonObject(text) {
+  const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
-    return JSON.parse(text);
+    return JSON.parse(raw);
   } catch {
-    const start = String(text).indexOf('{');
-    const end = String(text).lastIndexOf('}');
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
     if (start >= 0 && end > start) {
-      return JSON.parse(text.slice(start, end + 1));
+      try {
+        return JSON.parse(raw.slice(start, end + 1));
+      } catch {
+        // The slice is still not JSON. Fall through to the same error.
+      }
     }
-    throw httpError('Grok returned unparseable JSON', 502);
   }
+  throw httpError('Grok returned unparseable JSON', 502);
+}
+
+function grokMessageText(message) {
+  // reasoning_content is the scratchpad. It can hold discarded code. Never
+  // parse it into files that get committed (advisory premise on #589).
+  return message && typeof message.content === 'string' ? message.content : '';
 }
 
 async function listGrokModels({ apiKey, apiBase = XAI_API, fetchImpl = fetch }) {
@@ -195,17 +206,29 @@ async function callGrokJson({
       messages,
       temperature: 0,
       reasoning_effort: effort,
-      max_tokens: Number(process.env.XAI_MAX_TOKENS || 16384),
+      // max_tokens counts thinking. max_completion_tokens is the visible
+      // answer only, so five full files are not cut off before the first brace
+      // (Decision [2026-10-04-0001]). XAI_MAX_TOKENS still overrides the cap.
+      max_completion_tokens: Number(process.env.XAI_MAX_TOKENS || 65536),
     }),
   });
   if (!res.ok) {
     throw httpError(`xAI ${model} → ${res.status}`, res.status);
   }
   const body = await res.json();
-  const text = body && body.choices && body.choices[0] && body.choices[0].message
-    ? body.choices[0].message.content
-    : '';
-  return parseJsonObject(text);
+  const choice = body && body.choices && body.choices[0] ? body.choices[0] : {};
+  const message = choice.message || {};
+  try {
+    return parseJsonObject(grokMessageText(message));
+  } catch (err) {
+    if (!err || err.status !== 502) throw err;
+    const contentLen = typeof message.content === 'string' ? message.content.length : 0;
+    const reasoningLen = typeof message.reasoning_content === 'string' ? message.reasoning_content.length : 0;
+    throw httpError(
+      `Grok returned unparseable JSON (finish_reason=${choice.finish_reason || 'unknown'}, content_chars=${contentLen}, reasoning_chars=${reasoningLen})`,
+      502,
+    );
+  }
 }
 
 function buildWriterPrompt({ issue, plan, profile }) {
@@ -289,6 +312,8 @@ module.exports = {
   normalizeApiBase,
   normalizeRepoPath,
   resolveWriterAuth,
+  grokMessageText,
+  parseJsonObject,
   selectGrokModel,
   stripProviderPrefix,
   validateFiles,
