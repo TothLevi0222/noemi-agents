@@ -1125,6 +1125,81 @@ test('critiquePlanLive: 503 after retry is not a plan verdict', async () => {
   else process.env.MODEL_RETRY_BASE_MS = prev;
 });
 
+test('writer request: gateway forwards the completion cap; api.x.ai does not get the proxy flag', async () => {
+  const plan = {
+    status: 'accepted',
+    files: ['coding-loop/run.js'],
+    plan: '## Goal\nfix runner',
+  };
+  const seen = [];
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).endsWith('/models')) {
+      const id = String(url).includes('api.x.ai') ? 'grok-4.6' : 'xai/grok-4.6';
+      return { ok: true, status: 200, json: async () => ({ data: [{ id }] }) };
+    }
+    seen.push(JSON.parse(opts.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          finish_reason: 'stop',
+          message: {
+            content: '{"summary":"ok","files":[{"path":"coding-loop/run.js","content":"module.exports = {};\\n"}]}',
+            reasoning_content: '{"summary":"discarded","files":[]}',
+          },
+        }],
+      }),
+    };
+  };
+  const gateway = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    fetchImpl,
+  });
+  assert.equal(gateway.status, 'ready');
+  assert.equal(seen[0].max_completion_tokens, 65536);
+  assert.equal(seen[0].max_tokens, undefined);
+  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens']);
+
+  const native = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { XAI_API_KEY: 'xai-test' },
+    fetchImpl,
+  });
+  assert.equal(native.status, 'ready');
+  assert.equal(seen[1].max_completion_tokens, 65536);
+  assert.equal(seen[1].allowed_openai_params, undefined);
+  assert.equal(seen[1].model, 'grok-4.6');
+
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: 'gw-test' },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: false,
+          status: 400,
+          text: async () => '{"error":{"message":"bad param sk-supersecret Bearer leaked-token"}}',
+        };
+      },
+    }),
+    (err) => err.status === 400
+      && /xAI xai\/grok-4\.6 → 400/.test(err.message)
+      && /bad param/.test(err.message)
+      && !/sk-supersecret/.test(err.message)
+      && !/leaked-token/.test(err.message)
+      && /sk-REDACTED/.test(err.message)
+      && /Bearer REDACTED/.test(err.message),
+  );
+});
+
 test('writer JSON: fences parse; reasoning_content is not the answer', () => {
   assert.deepEqual(parseJsonObject('```json\n{"summary":"ok","files":[]}\n```'), { summary: 'ok', files: [] });
   assert.equal(
