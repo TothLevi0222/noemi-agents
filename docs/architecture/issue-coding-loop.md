@@ -216,7 +216,8 @@ Default `maxCycles` is 3 (`docs/model-routing.json` → `planRedTeam`).
 as `noemi-agent`. Label `noemi:in-progress`. Open a PR against `develop` (then
 `dev`). Never against `main` when an integration branch exists (Decision
 [2026-08-16-0003]). `--implement` prepares the envelope (`opened: false`).
-`--implement --open-pr` calls Grok (`coding-loop/writer.js`) and opens the
+`--implement --open-pr` reads the allow-listed files from the base branch,
+calls Grok for one JSON object (`coding-loop/writer.js`), and opens the
 PR with `AGENT_GH_TOKEN` (`coding-loop/dispatch.js`). Pickup does not open
 PRs just because the producer token is present.
 

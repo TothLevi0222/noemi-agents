@@ -168,7 +168,15 @@ async function implementFromPlan({ args, issue, plan }) {
   const prepared = prepareImplementation({ issue, plan, branches });
   if (!args.openPr || prepared.status !== 'ready') return prepared;
 
-  const drafted = await draftChanges({ issue, plan, env: process.env, profile: args.profile });
+  const drafted = await draftChanges({
+    issue,
+    plan,
+    env: process.env,
+    profile: args.profile,
+    repo: args.repo,
+    base: prepared.base,
+    token: resolveProducerToken(process.env).token,
+  });
   if (drafted.status === 'refused') {
     return {
       ...prepared,

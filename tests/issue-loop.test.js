@@ -978,6 +978,11 @@ test('scanIssueBody: blocks keys, approves ordinary issue text', () => {
   assert.ok(pem.findings.some((f) => f.type === 'private_key'));
   const aws = scanIssueBody('AKIAIOSFODNN7EXAMPLE extra text');
   assert.equal(aws.status, 'BLOCKED');
+  const localMongo = scanIssueBody('MONGO_URI=mongodb://mongo:27017/noemi_ea');
+  assert.equal(localMongo.status, 'APPROVED');
+  const secretMongo = scanIssueBody('MONGO_URI=mongodb://user:secret@db.example/noemi');
+  assert.equal(secretMongo.status, 'BLOCKED');
+  assert.ok(secretMongo.findings.some((f) => f.type === 'connection_string'));
 });
 
 test('Stage D: waits until a PR is opened, then delegates to the fleet reviewer', () => {
@@ -1161,7 +1166,8 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
   assert.equal(gateway.status, 'ready');
   assert.equal(seen[0].max_completion_tokens, 65536);
   assert.equal(seen[0].max_tokens, undefined);
-  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens']);
+  assert.deepEqual(seen[0].response_format, { type: 'json_object' });
+  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens', 'response_format']);
 
   const native = await draftChanges({
     issue: issue(),
@@ -1172,6 +1178,7 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
   assert.equal(native.status, 'ready');
   assert.equal(seen[1].max_completion_tokens, 65536);
   assert.equal(seen[1].allowed_openai_params, undefined);
+  assert.deepEqual(seen[1].response_format, { type: 'json_object' });
   assert.equal(seen[1].model, 'grok-4.6');
 
   await assert.rejects(
@@ -1198,6 +1205,115 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
       && /sk-REDACTED/.test(err.message)
       && /Bearer REDACTED/.test(err.message),
   );
+
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: 'gw-test' },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{
+              finish_reason: 'stop',
+              message: { content: 'I will read the files. sk-supersecret' },
+            }],
+          }),
+        };
+      },
+    }),
+    (err) => err.status === 422
+      && /I will read the files/.test(err.message)
+      && !/sk-supersecret/.test(err.message),
+  );
+
+  let prompt = '';
+  const sourced = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async (path) => {
+      if (String(path).includes('missing.js')) {
+        const err = new Error('missing');
+        err.status = 404;
+        throw err;
+      }
+      assert.match(String(path), /\/repos\/newpush\/newpush-agents\/contents\/coding-loop\/run\.js\?ref=develop/);
+      return {
+        type: 'file',
+        encoding: 'base64',
+        content: Buffer.from('const old = true;\n').toString('base64'),
+      };
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      prompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/run.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.equal(sourced.status, 'ready');
+  assert.match(prompt, /const old = true/);
+  assert.match(prompt, /Do not say you will read files/);
+
+  const missingPlan = {
+    status: 'accepted',
+    files: ['coding-loop/missing.js'],
+    plan: '## Goal\nadd file',
+  };
+  let missingPrompt = '';
+  await draftChanges({
+    issue: issue(),
+    plan: missingPlan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => {
+      const err = new Error('missing');
+      err.status = 404;
+      throw err;
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      missingPrompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/missing.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.match(missingPrompt, /not on the base branch/);
 
   const customKey = 'custom-gateway-token-value';
   await assert.rejects(

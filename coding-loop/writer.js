@@ -196,6 +196,9 @@ function redactModelError(text, apiKey) {
 function completionTokenFields(apiBase) {
   const fields = {
     max_completion_tokens: Number(process.env.XAI_MAX_TOKENS || 65536),
+    // Prose such as "I'll read the files" is not a file edit. JSON mode
+    // rejects that reply before it can be committed (Decision [2026-10-04-0003]).
+    response_format: { type: 'json_object' },
   };
   let host = '';
   try {
@@ -203,11 +206,11 @@ function completionTokenFields(apiBase) {
   } catch {
     host = '';
   }
-  // api.x.ai accepts max_completion_tokens. The NewPush gateway is LiteLLM and
-  // returns 400 for grok-4.6 unless the request allows the field through
+  // api.x.ai accepts these fields. The NewPush gateway is LiteLLM and
+  // returns 400 for grok-4.6 unless the request names them
   // (Decision [2026-10-04-0002]).
   if (host !== 'api.x.ai') {
-    fields.allowed_openai_params = ['max_completion_tokens'];
+    fields.allowed_openai_params = ['max_completion_tokens', 'response_format'];
   }
   return fields;
 }
@@ -267,14 +270,61 @@ async function callGrokJson({
     if (!err || err.status !== 502) throw err;
     const contentLen = typeof message.content === 'string' ? message.content.length : 0;
     const reasoningLen = typeof message.reasoning_content === 'string' ? message.reasoning_content.length : 0;
+    const preview = redactModelError(typeof message.content === 'string' ? message.content : '', apiKey).slice(0, 120);
+    const previewSuffix = preview ? `: ${preview}` : '';
+    // Same prose on every retry is not a transient outage. 422 is not retried.
     throw httpError(
-      `Grok returned unparseable JSON (finish_reason=${choice.finish_reason || 'unknown'}, content_chars=${contentLen}, reasoning_chars=${reasoningLen})`,
-      502,
+      `Grok returned unparseable JSON (finish_reason=${choice.finish_reason || 'unknown'}, content_chars=${contentLen}, reasoning_chars=${reasoningLen})${previewSuffix}`,
+      422,
     );
   }
 }
 
-function buildWriterPrompt({ issue, plan, profile }) {
+function formatSource(source) {
+  if (source && source.missing) {
+    return `Path: ${source.path}\nThis path is not on the base branch. Create it if the plan requires it.`;
+  }
+  return `Path: ${source.path}\n<file>\n${source.content}\n</file>`;
+}
+
+function githubContentsPath(repo, filePath, ref) {
+  const encoded = String(filePath || '').split('/').map((part) => encodeURIComponent(part)).join('/');
+  return `/repos/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`;
+}
+
+const MAX_SOURCE_CHARS = 100000;
+
+async function loadBaseFiles({ repo, ref, files, token, ghImpl } = {}) {
+  const call = ghImpl || require('../scripts/github-client.js').gh;
+  const sources = [];
+  for (const filePath of files || []) {
+    let payload;
+    try {
+      payload = await call(githubContentsPath(repo, filePath, ref), { token });
+    } catch (err) {
+      if (err && err.status === 404) {
+        sources.push({ path: filePath, missing: true });
+        continue;
+      }
+      throw err;
+    }
+    if (!payload || payload.type !== 'file' || payload.encoding !== 'base64' || typeof payload.content !== 'string') {
+      return { ok: false, reason: 'writer-source-not-file', path: filePath };
+    }
+    const content = Buffer.from(payload.content.replace(/\n/g, ''), 'base64').toString('utf8');
+    if (content.length > MAX_SOURCE_CHARS) {
+      return { ok: false, reason: 'writer-source-too-large', path: filePath };
+    }
+    const scan = scanIssueBody(content);
+    if (scan.status === 'BLOCKED') {
+      return { ok: false, reason: 'writer-source-scan-blocked', path: filePath };
+    }
+    sources.push({ path: filePath, content });
+  }
+  return { ok: true, sources };
+}
+
+function buildWriterPrompt({ issue, plan, profile, sources } = {}) {
   const { resolveProfile } = require('./profile.js');
   const resolved = resolveProfile(profile && profile.id ? profile.id : profile);
   const allow = (plan.files || []).map((file) => `- ${file}`).join('\n');
@@ -285,9 +335,11 @@ function buildWriterPrompt({ issue, plan, profile }) {
       'Do not write GEMINI.md, CLAUDE.md, or skills-dist/ — generate_all.js owns those.',
     ]
     : [];
+  const loaded = Array.isArray(sources) ? sources : [];
   return [
     'Implement ONLY the accepted plan. Return JSON only:',
     '{"summary":"...","files":[{"path":"...","content":"..."}]}',
+    'You have no tools and no later turn. Do not say you will read files.',
     'Every path must be in the allow-list. Send complete file contents, not patches.',
     'Do not invent paths. Do not touch governance carve-outs. Do not include secrets.',
     ...specLines,
@@ -300,12 +352,41 @@ function buildWriterPrompt({ issue, plan, profile }) {
     '<plan>',
     plan.plan || '',
     '</plan>',
+    '',
+    'Current files on the base branch:',
+    loaded.length ? loaded.map(formatSource).join('\n\n') : '(none loaded)',
   ].join('\n');
 }
 
-async function draftChanges({ issue, plan, env = process.env, callModel, fetchImpl, profile } = {}) {
+async function draftChanges({
+  issue,
+  plan,
+  env = process.env,
+  callModel,
+  fetchImpl,
+  profile,
+  repo,
+  base,
+  token,
+  ghImpl,
+} = {}) {
   if (!plan || plan.status !== 'accepted') {
     return { status: 'refused', reason: 'plan-not-accepted', files: [] };
+  }
+  let sources = [];
+  if (typeof callModel !== 'function' && (repo || base || token)) {
+    if (!repo || !base || !token) {
+      return { status: 'refused', reason: 'writer-source-unavailable', files: [] };
+    }
+    const loaded = await loadBaseFiles({
+      repo,
+      ref: base,
+      files: plan.files,
+      token,
+      ghImpl,
+    });
+    if (!loaded.ok) return { status: 'refused', reason: loaded.reason, files: [] };
+    sources = loaded.sources;
   }
   const invoke = typeof callModel === 'function'
     ? () => callModel({ issue, plan })
@@ -316,8 +397,8 @@ async function draftChanges({ issue, plan, env = process.env, callModel, fetchIm
       const reply = await callGrokJson({
         model: chosen.id,
         messages: [
-          { role: 'system', content: 'You are noemi-agent implementing one accepted plan. JSON only.' },
-          { role: 'user', content: buildWriterPrompt({ issue, plan, profile }) },
+          { role: 'system', content: 'You are noemi-agent. You have no tools. Reply with one JSON object and no other text.' },
+          { role: 'user', content: buildWriterPrompt({ issue, plan, profile, sources }) },
         ],
         apiKey: auth.apiKey,
         apiBase: auth.apiBase,

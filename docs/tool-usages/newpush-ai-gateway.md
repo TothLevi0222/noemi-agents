@@ -44,9 +44,10 @@ tokens. The writer sets `max_completion_tokens` (default 65536, override
 `XAI_MAX_TOKENS`) so that budget is the visible file JSON, not the thinking.
 This gateway is LiteLLM. It returns HTTP 400 `UnsupportedParamsError` for
 `max_completion_tokens` on `xai/grok-4.6` unless the body also includes
-`allowed_openai_params: ["max_completion_tokens"]`. The writer adds that
-allow-list on every base other than `api.x.ai`. `max_tokens` is not sent:
-it counts thinking and the visible answer together.
+`allowed_openai_params`. The writer names `max_completion_tokens` and
+`response_format` on every base other than `api.x.ai`, and sets
+`response_format` to `json_object`. `max_tokens` is not sent: it counts
+thinking and the visible answer together.
 
 ```bash
 curl -sS "https://ai-gw.newpush.com/v1/models" \
