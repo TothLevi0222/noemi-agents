@@ -42,6 +42,11 @@ Header: `Authorization: Bearer sk-...`
 Override the writer pin with `XAI_CODE_MODEL`. Grok 4.6 spends thinking
 tokens. The writer sets `max_completion_tokens` (default 65536, override
 `XAI_MAX_TOKENS`) so that budget is the visible file JSON, not the thinking.
+This gateway is LiteLLM. It returns HTTP 400 `UnsupportedParamsError` for
+`max_completion_tokens` on `xai/grok-4.6` unless the body also includes
+`allowed_openai_params: ["max_completion_tokens"]`. The writer adds that
+allow-list on every base other than `api.x.ai`. `max_tokens` is not sent:
+it counts thinking and the visible answer together.
 
 ```bash
 curl -sS "https://ai-gw.newpush.com/v1/models" \
@@ -61,6 +66,7 @@ until a dedicated decision retargets them.
 
 | HTTP | Meaning |
 |---|---|
+| 400 | Rejected parameter. `max_completion_tokens` without `allowed_openai_params` is this case for `xai/grok-4.6` |
 | 401 | Missing or invalid virtual key |
 | 403 | Model not allowed on the key/team, or budget/RPM/TPM exhausted |
 | 429 | Rate limited — back off |

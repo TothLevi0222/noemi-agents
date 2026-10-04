@@ -176,6 +176,42 @@ function grokMessageText(message) {
   return message && typeof message.content === 'string' ? message.content : '';
 }
 
+function redactModelError(text, apiKey) {
+  // Strip the key this request sent before any slice. A gateway can echo a
+  // token that matches neither sk- nor Bearer (advisory code on #590).
+  // Shorter than 8 characters is not treated as a credential: deleting it
+  // would blank ordinary words in the error.
+  let out = String(text || '');
+  const secret = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (secret.length >= 8) out = out.split(secret).join('[redacted]');
+  return out
+    .replace(/sk-[A-Za-z0-9_-]+/g, 'sk-REDACTED')
+    .replace(/Bearer\s+\S+/gi, 'Bearer REDACTED')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 400);
+}
+
+/** Visible-answer cap. LiteLLM drops max_completion_tokens unless named. */
+function completionTokenFields(apiBase) {
+  const fields = {
+    max_completion_tokens: Number(process.env.XAI_MAX_TOKENS || 65536),
+  };
+  let host = '';
+  try {
+    host = new URL(apiBase).host;
+  } catch {
+    host = '';
+  }
+  // api.x.ai accepts max_completion_tokens. The NewPush gateway is LiteLLM and
+  // returns 400 for grok-4.6 unless the request allows the field through
+  // (Decision [2026-10-04-0002]).
+  if (host !== 'api.x.ai') {
+    fields.allowed_openai_params = ['max_completion_tokens'];
+  }
+  return fields;
+}
+
 async function listGrokModels({ apiKey, apiBase = XAI_API, fetchImpl = fetch }) {
   const res = await fetchImpl(`${apiBase}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -206,14 +242,21 @@ async function callGrokJson({
       messages,
       temperature: 0,
       reasoning_effort: effort,
-      // max_tokens counts thinking. max_completion_tokens is the visible
-      // answer only, so five full files are not cut off before the first brace
-      // (Decision [2026-10-04-0001]). XAI_MAX_TOKENS still overrides the cap.
-      max_completion_tokens: Number(process.env.XAI_MAX_TOKENS || 65536),
+      // max_tokens counts thinking and the visible answer together. The
+      // completion cap is the visible answer only (Decision [2026-10-04-0001]).
+      ...completionTokenFields(apiBase),
     }),
   });
   if (!res.ok) {
-    throw httpError(`xAI ${model} → ${res.status}`, res.status);
+    let raw = '';
+    try {
+      raw = typeof res.text === 'function' ? await res.text() : '';
+    } catch {
+      raw = '';
+    }
+    const detail = redactModelError(raw, apiKey);
+    const suffix = detail ? `: ${detail}` : '';
+    throw httpError(`xAI ${model} → ${res.status}${suffix}`, res.status);
   }
   const body = await res.json();
   const choice = body && body.choices && body.choices[0] ? body.choices[0] : {};
