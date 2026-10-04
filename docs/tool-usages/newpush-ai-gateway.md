@@ -40,7 +40,8 @@ Header: `Authorization: Bearer sk-...`
 | `google/gemini-3.8-flash` | Gemini on the OpenAI surface |
 
 Override the writer pin with `XAI_CODE_MODEL`. Grok 4.6 spends thinking
-tokens; the writer sets `max_tokens` (default 16384, override `XAI_MAX_TOKENS`).
+tokens. The writer sets `max_completion_tokens` (default 65536, override
+`XAI_MAX_TOKENS`) so that budget is the visible file JSON, not the thinking.
 
 ```bash
 curl -sS "https://ai-gw.newpush.com/v1/models" \

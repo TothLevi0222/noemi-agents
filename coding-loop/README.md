@@ -163,7 +163,10 @@ conductor token is refused.
 `XAI_API_KEY` against `https://api.x.ai/v1`, **or** NewPush gateway
 `AI_GW_API_TOKEN` / `AI_GW_API_KEY` at `https://ai-gw.newpush.com/v1` (override
 `AI_GW_BASE_URL`). Gateway model ids are `provider/id`; the writer pins
-`xai/grok-4.6` unless `XAI_CODE_MODEL` is set. The virtual key is never sent
+`xai/grok-4.6` unless `XAI_CODE_MODEL` is set. The request sets
+`max_completion_tokens` (default 65536, override `XAI_MAX_TOKENS`) so thinking
+tokens are not taken from the file JSON. If the visible answer has no JSON
+object, the writer reads `reasoning_content`. The virtual key is never sent
 to api.x.ai. See [`docs/tool-usages/newpush-ai-gateway.md`](../docs/tool-usages/newpush-ai-gateway.md).
 It opens the PR as `noemi-agent`. It refuses paths outside the plan,
 governance carve-outs, and secret-shaped content. It does not approve or
