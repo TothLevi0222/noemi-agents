@@ -168,9 +168,10 @@ conductor token is refused.
 tokens are not taken from the file JSON. The NewPush gateway is LiteLLM and
 rejects that field for `grok-4.6` unless the body also sends
 `allowed_openai_params: ["max_completion_tokens"]`. Native `api.x.ai` does not
-get that proxy flag. A non-OK reply includes a short redacted body. A reply
-whose visible answer has no JSON object fails closed. `reasoning_content` is
-not parsed. The virtual key is never sent to api.x.ai. See
+get that proxy flag. A non-OK reply includes a short redacted body: the key
+sent on the request is removed before `sk-` and `Bearer` redaction and before
+the 400-character slice. A reply whose visible answer has no JSON object
+fails closed. `reasoning_content` is not parsed. The virtual key is never sent to api.x.ai. See
 [`docs/tool-usages/newpush-ai-gateway.md`](../docs/tool-usages/newpush-ai-gateway.md).
 It opens the PR as `noemi-agent`. It refuses paths outside the plan,
 governance carve-outs, and secret-shaped content. It does not approve or

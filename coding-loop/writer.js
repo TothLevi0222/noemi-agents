@@ -176,8 +176,15 @@ function grokMessageText(message) {
   return message && typeof message.content === 'string' ? message.content : '';
 }
 
-function redactModelError(text) {
-  return String(text || '')
+function redactModelError(text, apiKey) {
+  // Strip the key this request sent before any slice. A gateway can echo a
+  // token that matches neither sk- nor Bearer (advisory code on #590).
+  // Shorter than 8 characters is not treated as a credential: deleting it
+  // would blank ordinary words in the error.
+  let out = String(text || '');
+  const secret = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (secret.length >= 8) out = out.split(secret).join('[redacted]');
+  return out
     .replace(/sk-[A-Za-z0-9_-]+/g, 'sk-REDACTED')
     .replace(/Bearer\s+\S+/gi, 'Bearer REDACTED')
     .replace(/\s+/g, ' ')
@@ -247,7 +254,7 @@ async function callGrokJson({
     } catch {
       raw = '';
     }
-    const detail = redactModelError(raw);
+    const detail = redactModelError(raw, apiKey);
     const suffix = detail ? `: ${detail}` : '';
     throw httpError(`xAI ${model} → ${res.status}${suffix}`, res.status);
   }

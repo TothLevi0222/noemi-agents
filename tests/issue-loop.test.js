@@ -1198,6 +1198,29 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
       && /sk-REDACTED/.test(err.message)
       && /Bearer REDACTED/.test(err.message),
   );
+
+  const customKey = 'custom-gateway-token-value';
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: customKey },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: false,
+          status: 400,
+          text: async () => `{"error":{"message":"echo ${customKey} tail"}}`,
+        };
+      },
+    }),
+    (err) => err.status === 400
+      && err.message.includes('[redacted]')
+      && err.message.includes('tail')
+      && !err.message.includes(customKey),
+  );
 });
 
 test('writer JSON: fences parse; reasoning_content is not the answer', () => {
