@@ -1125,13 +1125,16 @@ test('critiquePlanLive: 503 after retry is not a plan verdict', async () => {
   else process.env.MODEL_RETRY_BASE_MS = prev;
 });
 
-test('writer JSON: fences and reasoning_content are readable; a brace-free reply is not', () => {
+test('writer JSON: fences parse; reasoning_content is not the answer', () => {
   assert.deepEqual(parseJsonObject('```json\n{"summary":"ok","files":[]}\n```'), { summary: 'ok', files: [] });
   assert.equal(
     grokMessageText({ content: '', reasoning_content: '{"summary":"from-reasoning","files":[]}' }),
-    '{"summary":"from-reasoning","files":[]}',
+    '',
   );
-  assert.equal(grokMessageText({ content: '{"summary":"visible"}', reasoning_content: '{"summary":"hidden"}' }), '{"summary":"visible"}');
+  assert.equal(
+    grokMessageText({ content: '{"summary":"visible"}', reasoning_content: '{"summary":"discarded"}' }),
+    '{"summary":"visible"}',
+  );
   assert.throws(() => parseJsonObject('no braces here'), (err) => err.status === 502 && /unparseable JSON/.test(err.message));
 });
 

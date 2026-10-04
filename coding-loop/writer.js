@@ -171,11 +171,9 @@ function parseJsonObject(text) {
 }
 
 function grokMessageText(message) {
-  const content = message && typeof message.content === 'string' ? message.content : '';
-  const reasoning = message && typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
-  if (content.includes('{')) return content;
-  if (reasoning.includes('{')) return reasoning;
-  return content || reasoning;
+  // reasoning_content is the scratchpad. It can hold discarded code. Never
+  // parse it into files that get committed (advisory premise on #589).
+  return message && typeof message.content === 'string' ? message.content : '';
 }
 
 async function listGrokModels({ apiKey, apiBase = XAI_API, fetchImpl = fetch }) {
