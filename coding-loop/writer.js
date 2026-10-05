@@ -128,10 +128,11 @@ function credentialedConnection(match) {
 // parameter still blocks (advisory premise on #591).
 function scanDraftContent(content, prior) {
   const known = new Set(connectionMatches(prior).filter((match) => !credentialedConnection(match)));
-  let text = String(content);
-  for (const match of connectionMatches(content)) {
-    if (known.has(match)) text = text.split(match).join('local-service');
-  }
+  // Replace a whole URL token only. split() would also rewrite a known URL
+  // that is the prefix of a longer credentialed URL (advisory code on #591).
+  const text = String(content).replace(/\b(?:postgres|mysql|mongodb):\/\/\S+/gi, (match) => (
+    known.has(match) ? 'local-service' : match
+  ));
   return scanIssueBody(text);
 }
 

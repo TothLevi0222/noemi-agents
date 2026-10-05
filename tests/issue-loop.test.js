@@ -1398,6 +1398,20 @@ test('writer keeps a host-only database URL already on the base branch', async (
   assert.equal(withQuerySecret.status, 'refused');
   assert.equal(withQuerySecret.reason, 'writer-scan-blocked');
 
+  const prefixedSecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{
+        path,
+        content: `${prior}\nmongodb://mongo:27017/noemi_ea?password=secret\n`,
+      }],
+    }),
+  });
+  assert.equal(prefixedSecret.status, 'refused');
+  assert.equal(prefixedSecret.reason, 'writer-scan-blocked');
+
   const invented = await draftChanges({
     issue: issue(),
     plan,
