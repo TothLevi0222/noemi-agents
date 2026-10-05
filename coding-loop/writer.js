@@ -115,8 +115,41 @@ function selectGrokModel(ids, { pin } = {}) {
   throw httpError('No Grok model available in the xAI catalogue', 503);
 }
 
-function validateFiles(files, plan, profile) {
+function connectionMatches(text) {
+  return String(text || '').match(/\b(?:postgres|mysql|mongodb):\/\/\S+/gi) || [];
+}
+
+function credentialedConnection(match) {
+  return String(match).includes('@') || /[?&](?:password|pwd|pass|token|secret)=/i.test(match);
+}
+
+// The scanner stays strict. A host-only URL that is already on the base
+// branch may be kept verbatim. A new URL, userinfo, or a secret query
+// parameter still blocks (advisory premise on #591).
+function scanDraftContent(content, prior) {
+  const known = new Set(connectionMatches(prior).filter((match) => !credentialedConnection(match)));
+  let text = String(content);
+  for (const match of connectionMatches(content)) {
+    if (known.has(match)) text = text.split(match).join('local-service');
+  }
+  return scanIssueBody(text);
+}
+
+function sourceAllowedDespiteScan(content) {
+  const scan = scanIssueBody(content);
+  if (scan.status !== 'BLOCKED') return true;
+  if (scan.findings.some((finding) => finding.type !== 'connection_string')) return false;
+  const matches = connectionMatches(content);
+  return matches.length > 0 && matches.every((match) => !credentialedConnection(match));
+}
+
+function validateFiles(files, plan, profile, sources) {
   const { pathAllowedByProfile } = require('./profile.js');
+  const priorByPath = new Map(
+    (Array.isArray(sources) ? sources : [])
+      .filter((source) => source && !source.missing && typeof source.content === 'string')
+      .map((source) => [source.path, source.content]),
+  );
   if (!Array.isArray(files) || files.length === 0) {
     return { ok: false, reason: 'writer-empty' };
   }
@@ -144,7 +177,7 @@ function validateFiles(files, plan, profile) {
     if (file.content.length > MAX_FILE_CHARS) {
       return { ok: false, reason: 'writer-file-too-large' };
     }
-    const scan = scanIssueBody(file.content);
+    const scan = scanDraftContent(file.content, priorByPath.get(filePath) || '');
     if (scan.status === 'BLOCKED') {
       return { ok: false, reason: 'writer-scan-blocked' };
     }
@@ -315,8 +348,7 @@ async function loadBaseFiles({ repo, ref, files, token, ghImpl } = {}) {
     if (content.length > MAX_SOURCE_CHARS) {
       return { ok: false, reason: 'writer-source-too-large', path: filePath };
     }
-    const scan = scanIssueBody(content);
-    if (scan.status === 'BLOCKED') {
+    if (!sourceAllowedDespiteScan(content)) {
       return { ok: false, reason: 'writer-source-scan-blocked', path: filePath };
     }
     sources.push({ path: filePath, content });
@@ -369,11 +401,12 @@ async function draftChanges({
   base,
   token,
   ghImpl,
+  sources: seededSources,
 } = {}) {
   if (!plan || plan.status !== 'accepted') {
     return { status: 'refused', reason: 'plan-not-accepted', files: [] };
   }
-  let sources = [];
+  let sources = Array.isArray(seededSources) ? seededSources : [];
   if (typeof callModel !== 'function' && (repo || base || token)) {
     if (!repo || !base || !token) {
       return { status: 'refused', reason: 'writer-source-unavailable', files: [] };
@@ -409,7 +442,7 @@ async function draftChanges({
 
   const reply = await withRetry(invoke, modelRetryOptions());
   const files = reply && Array.isArray(reply.files) ? reply.files : [];
-  const checked = validateFiles(files, plan, profile);
+  const checked = validateFiles(files, plan, profile, sources);
   if (!checked.ok) {
     return { status: 'refused', reason: checked.reason, files: [], model: reply && reply.model };
   }

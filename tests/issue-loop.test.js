@@ -979,10 +979,14 @@ test('scanIssueBody: blocks keys, approves ordinary issue text', () => {
   const aws = scanIssueBody('AKIAIOSFODNN7EXAMPLE extra text');
   assert.equal(aws.status, 'BLOCKED');
   const localMongo = scanIssueBody('MONGO_URI=mongodb://mongo:27017/noemi_ea');
-  assert.equal(localMongo.status, 'APPROVED');
+  assert.equal(localMongo.status, 'BLOCKED');
+  assert.ok(localMongo.findings.some((f) => f.type === 'connection_string'));
   const secretMongo = scanIssueBody('MONGO_URI=mongodb://user:secret@db.example/noemi');
   assert.equal(secretMongo.status, 'BLOCKED');
-  assert.ok(secretMongo.findings.some((f) => f.type === 'connection_string'));
+  const querySecret = scanIssueBody('MONGO_URI=mongodb://db.example/noemi?password=secret');
+  assert.equal(querySecret.status, 'BLOCKED');
+  const userOnly = scanIssueBody('MONGO_URI=mongodb://reader@db.example/noemi');
+  assert.equal(userOnly.status, 'BLOCKED');
 });
 
 test('Stage D: waits until a PR is opened, then delegates to the fleet reviewer', () => {
@@ -1362,6 +1366,70 @@ test('selectGrokModel: highest preview then stable; missing pin fails closed', (
   assert.equal(gw.id, 'xai/grok-4.6');
   assert.equal(selectGrokModel(['xai/grok-4.6'], { pin: 'xai/grok-4.6' }).id, 'xai/grok-4.6');
   assert.throws(() => selectGrokModel(['gpt-4']), /No Grok model/);
+});
+
+test('writer keeps a host-only database URL already on the base branch', async () => {
+  const path = 'tools/executive-assistant/docker-compose.yml';
+  const prior = 'services:\n  app:\n    environment:\n      - MONGO_URI=mongodb://mongo:27017/noemi_ea\n';
+  const plan = { status: 'accepted', files: [path], plan: '## Goal\ncompose' };
+  const sources = [{ path, content: prior }];
+  const kept = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      summary: 'pin image',
+      files: [{
+        path,
+        content: `${prior}    image: ghcr.io/project-noemi/gmail-executive-assistant:latest\n`,
+      }],
+    }),
+  });
+  assert.equal(kept.status, 'ready');
+
+  const withQuerySecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: prior.replace('noemi_ea', 'noemi_ea?password=secret') }],
+    }),
+  });
+  assert.equal(withQuerySecret.status, 'refused');
+  assert.equal(withQuerySecret.reason, 'writer-scan-blocked');
+
+  const invented = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: 'mongodb://other:27017/db\n' }],
+    }),
+  });
+  assert.equal(invented.status, 'refused');
+  assert.equal(invented.reason, 'writer-scan-blocked');
+
+  let called = false;
+  const credentialed = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => ({
+      type: 'file',
+      encoding: 'base64',
+      content: Buffer.from('MONGO_URI=mongodb://user:secret@db.example/noemi\n').toString('base64'),
+    }),
+    fetchImpl: async () => {
+      called = true;
+      throw new Error('model must not be called');
+    },
+  });
+  assert.equal(credentialed.status, 'refused');
+  assert.equal(credentialed.reason, 'writer-source-scan-blocked');
+  assert.equal(called, false);
 });
 
 test('draftChanges: refuses paths outside the plan and secret-shaped content', async () => {

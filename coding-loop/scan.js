@@ -15,9 +15,7 @@ const PATTERNS = [
   { type: 'slack_token', re: /\bxox[baprs]-/ },
   { type: 'openai_key', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
   { type: 'ssn', re: /\b\d{3}-\d{2}-\d{4}\b/ },
-  // A host-only URI such as mongodb://mongo:27017/db is not a credential.
-  // Block the form that carries a username and password.
-  { type: 'connection_string', re: /\b(?:postgres|mysql|mongodb):\/\/[^\s/:@]+:[^\s/@]+@/i },
+  { type: 'connection_string', re: /\b(?:postgres|mysql|mongodb):\/\/\S+/i },
 ];
 
 function scanIssueBody(text) {
