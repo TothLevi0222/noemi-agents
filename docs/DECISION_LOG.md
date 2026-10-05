@@ -1452,3 +1452,9 @@
 - **Decision:** A private copy of this repository publishes `ghcr.io/<owner>/gmail-executive-assistant` with `GITHUB_TOKEN`. That package stays private. Org **Package creation → Public** stays unchecked so members cannot flip a package to public. The publish workflow never changes visibility. On `project-noemi` an anonymous `docker manifest inspect` must succeed (the public reference image, Decision [2026-10-05-0003]). On any other owner that same anonymous inspect **failing** is the pass condition; a successful anonymous inspect fails the job. Making a package public in the UI cannot be reversed.
 - **Context:** Operators fork or copy this tree for private agentic work (`README.md`, `docs/UPSTREAM_SYNC.md`, `coding-loop/README.md`). The public reference org had to enable Public package creation once so `gmail-executive-assistant` could be pulled without credentials. Copying that org checkbox, or copying a workflow that *requires* anonymous inspect, would publish private clone images to the world.
 - **Impact:** `.github/workflows/publish-gmail-ea.yml`, `README.md`, `docs/UPSTREAM_SYNC.md`, `coding-loop/README.md`.
+
+## [2026-10-05-0006] Gmail EA :latest Publishes from develop with Locked UI Deps
+
+- **Decision:** The publish workflow runs on path-filtered `push` to `develop` and on `workflow_dispatch`. Feature-branch pushes do not retag `:latest`. `permissions` include `id-token: write` and `attestations: write` so `docker/build-push-action@v6` can sign provenance. The UI builder copies `ui/package-lock.json` and runs `npm ci`.
+- **Context:** Advisory code review on #596: unfiltered `push` overwrote `:latest` from any branch; `provenance: true` without `id-token: write`; builder `npm install` with only `ui/package.json`.
+- **Impact:** `.github/workflows/publish-gmail-ea.yml`, `tools/executive-assistant/Dockerfile`, `tools/executive-assistant/ui/package-lock.json`.

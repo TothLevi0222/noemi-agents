@@ -3,6 +3,8 @@ name: Publish Gmail EA image
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - ".github/workflows/publish-gmail-ea.yml"
       - "tools/executive-assistant/Dockerfile"
@@ -19,8 +21,9 @@ concurrency:
 permissions:
   contents: read
   packages: write
-  # docker/build-push-action@v6 writes provenance attestations by default.
+  # docker/build-push-action@v6 provenance: GHCR attestations plus OIDC.
   attestations: write
+  id-token: write
 
 # Visibility: this workflow never changes package visibility. GitHub creates
 # a private package on first push. The public reference image on
@@ -28,6 +31,8 @@ permissions:
 # [2026-10-05-0003]). A private clone must leave org Package creation
 # Public unchecked; the "Refuse an anonymous pull" step fails the job if
 # that clone's image is world-pullable (Decision [2026-10-05-0005]).
+# :latest is retagged from develop pushes and workflow_dispatch only
+# (Decision [2026-10-05-0006]).
 jobs:
   publish:
     name: Build and push GHCR image

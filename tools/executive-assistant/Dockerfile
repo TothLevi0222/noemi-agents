@@ -9,8 +9,8 @@ FROM node:24-alpine AS builder
 
 WORKDIR /usr/src/app
 
-COPY ui/package.json ./ui/
-RUN cd ui && npm install
+COPY ui/package.json ui/package-lock.json ./ui/
+RUN cd ui && npm ci
 COPY ui ./ui
 RUN cd ui && npm run build
 
