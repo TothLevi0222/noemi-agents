@@ -1,35 +1,27 @@
 # Dockerfile
-# Project NoéMI - Executive Assistant (Cloud Run)
+# Project NoéMI - Executive Assistant
+#
+# Self-contained image: production Node deps + Vite admin UI built in-image
+# so ui/dist does not need to be committed.
 
-# Multi-stage build for a lean production image
-FROM node:24-alpine AS builder
-
-WORKDIR /usr/src/app
-
-COPY package*.json ./
-# Install all dependencies (including devDependencies if needed for build)
-RUN npm install
-
-COPY . .
-
-# Final stage
 FROM node:24-alpine
 
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-# Only install production dependencies
-RUN npm install --production
+RUN npm ci --omit=dev
 
-# Copy application files out of builder ensuring no tests or extraneous markdown files bulk up the container
-COPY --from=builder /usr/src/app/index.js ./
-COPY --from=builder /usr/src/app/server.js ./
-COPY --from=builder /usr/src/app/delta-sync.js ./
-COPY --from=builder /usr/src/app/state-manager.js ./
-COPY --from=builder /usr/src/app/triage-router.js ./
-COPY --from=builder /usr/src/app/oauth-manager.js ./
+COPY ui/package.json ./ui/
+RUN cd ui && npm install
+COPY ui ./ui
+RUN cd ui && npm run build
 
-# Best practice for Cloud Run Node.js execution
+COPY server.js ./
+COPY delta-sync.js ./
+COPY state-manager.js ./
+COPY triage-router.js ./
+COPY oauth-manager.js ./
+
 ENV PORT=8080
 EXPOSE 8080
 
