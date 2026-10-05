@@ -21,13 +21,19 @@ permissions:
   packages: write
   attestations: write
 
+# Visibility: this workflow never changes package visibility. GitHub creates
+# a private package on first push. The public reference image on
+# project-noemi was set public once in Package settings (Decision
+# [2026-10-05-0003]). A private clone must leave org Package creation
+# Public unchecked; the "Refuse an anonymous pull" step fails the job if
+# that clone's image is world-pullable (Decision [2026-10-05-0005]).
 jobs:
   publish:
     name: Build and push GHCR image
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      IMAGE: ghcr.io/project-noemi/gmail-executive-assistant
+      IMAGE: ghcr.io/${{ github.repository_owner }}/gmail-executive-assistant
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -56,14 +62,30 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
           labels: |
-            org.opencontainers.image.source=https://github.com/project-noemi/agents
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.title=gmail-executive-assistant
             org.opencontainers.image.description=Project NoéMI Gmail executive assistant
 
       - name: Inspect the published manifest (authenticated)
         run: docker buildx imagetools inspect "${IMAGE}:latest"
 
-      - name: Inspect the published manifest (anonymous)
+      - name: Require an anonymous pull (public reference image)
+        if: github.repository_owner == 'project-noemi'
         run: |
+          set -euo pipefail
           docker logout ghcr.io || true
           docker manifest inspect "${IMAGE}:latest"
+
+      - name: Refuse an anonymous pull (private clones)
+        if: github.repository_owner != 'project-noemi'
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io || true
+          if docker manifest inspect "${IMAGE}:latest"; then
+            echo 'This clone published a world-pullable GHCR package.'
+            echo 'Private agent work keeps GitHub Packages private.'
+            echo 'Leave org Settings → Packages → Package creation → Public unchecked.'
+            echo 'See README (GitHub Packages on a private clone) and docs/UPSTREAM_SYNC.md.'
+            exit 1
+          fi
+          echo 'Anonymous inspect failed. The package is not world-pullable.'

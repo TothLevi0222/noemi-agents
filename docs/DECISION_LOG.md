@@ -1446,3 +1446,9 @@
 - **Decision:** The Vite UI is built in a builder stage. The runtime image copies `ui/dist` and the server dependencies from `npm ci --omit=dev`. It does not copy `ui/node_modules`.
 - **Context:** Advisory review on #596 found `npm install` for the UI in the final stage, so Vite stayed in the published image while the description said production dependencies were omitted. Package visibility stays the one-time Package settings change in [2026-10-05-0003]. The workflow does not change it.
 - **Impact:** `tools/executive-assistant/Dockerfile`.
+
+## [2026-10-05-0005] Private Clones Keep GHCR Packages Private
+
+- **Decision:** A private copy of this repository publishes `ghcr.io/<owner>/gmail-executive-assistant` with `GITHUB_TOKEN`. That package stays private. Org **Package creation → Public** stays unchecked so members cannot flip a package to public. The publish workflow never changes visibility. On `project-noemi` an anonymous `docker manifest inspect` must succeed (the public reference image, Decision [2026-10-05-0003]). On any other owner that same anonymous inspect **failing** is the pass condition; a successful anonymous inspect fails the job. Making a package public in the UI cannot be reversed.
+- **Context:** Operators fork or copy this tree for private agentic work (`README.md`, `docs/UPSTREAM_SYNC.md`, `coding-loop/README.md`). The public reference org had to enable Public package creation once so `gmail-executive-assistant` could be pulled without credentials. Copying that org checkbox, or copying a workflow that *requires* anonymous inspect, would publish private clone images to the world.
+- **Impact:** `.github/workflows/publish-gmail-ea.yml`, `README.md`, `docs/UPSTREAM_SYNC.md`, `coding-loop/README.md`.

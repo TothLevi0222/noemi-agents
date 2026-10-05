@@ -49,6 +49,7 @@ If you do not already have `{org}/{org}-agents`:
 - Copy or fork `project-noemi/agents`.
 - Default branch `develop`. Keep the develop-only merge gate.
 - Point `scripts/sync-upstream.sh` at `project-noemi/agents` as `upstream`.
+- Keep GitHub Packages **private**. Leave org **Settings → Packages → Package creation → Public** unchecked. The Gmail EA publish workflow will fail this copy if `docker manifest inspect` succeeds without credentials. See `docs/UPSTREAM_SYNC.md` (GitHub Packages on a private clone).
 
 NewPush: this is `newpush/newpush-agents`. Sync #423 (or later `develop`)
 into that copy before turning pickup on.
