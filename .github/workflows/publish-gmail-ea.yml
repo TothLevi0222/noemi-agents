@@ -19,6 +19,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  attestations: write
 
 jobs:
   publish:
@@ -60,13 +61,34 @@ jobs:
             org.opencontainers.image.description=Project NoéMI Gmail executive assistant
 
       - name: Make the package public
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          pkg=gmail-executive-assistant
+          echo '--- GET org package ---'
+          gh api "orgs/project-noemi/packages/container/${pkg}" || true
+          echo '--- GET repo package ---'
+          gh api "repos/project-noemi/agents/packages/container/${pkg}" || true
+          echo '--- PATCH org visibility ---'
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github.package-deletes-preview+json" \
+            "orgs/project-noemi/packages/container/${pkg}" \
+            -f visibility=public || true
+          echo '--- PUT org visibility ---'
           gh api --method PUT \
-            orgs/project-noemi/packages/container/gmail-executive-assistant/visibility \
-            -f visibility=public
+            "orgs/project-noemi/packages/container/${pkg}/visibility" \
+            -f visibility=public || true
+          echo '--- PATCH repo visibility ---'
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github.package-deletes-preview+json" \
+            "repos/project-noemi/agents/packages/container/${pkg}" \
+            -f visibility=public || true
 
-      - name: Inspect the published manifest
+      - name: Inspect the published manifest (authenticated)
         run: docker buildx imagetools inspect "${IMAGE}:latest"
+
+      - name: Inspect the published manifest (anonymous)
+        run: |
+          docker logout ghcr.io || true
+          docker manifest inspect "${IMAGE}:latest"
