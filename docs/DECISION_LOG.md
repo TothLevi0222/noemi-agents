@@ -1440,3 +1440,9 @@
 - **Decision:** Anonymous `docker manifest inspect ghcr.io/project-noemi/gmail-executive-assistant:latest` is the publish gate. GitHub REST and GraphQL cannot change Container registry visibility for this org package (GET works with `GITHUB_TOKEN`; PATCH/PUT `/visibility` return 404). The organization must allow public package creation under Settings → Packages; the package itself is then set public once in Package settings. Later pushes keep that visibility. The publish workflow inspects authenticated, then logs out of `ghcr.io` and inspects anonymously.
 - **Context:** The first Actions publish created the package as private because `project-noemi` had public package creation unchecked. Unauthenticated inspect returned 401. The GitHub UI Danger Zone Public radio was disabled until that org checkbox was saved. A public package cannot be made private again.
 - **Impact:** `.github/workflows/publish-gmail-ea.yml`. Org setting: https://github.com/organizations/project-noemi/settings/packages. Package: https://github.com/orgs/project-noemi/packages/container/gmail-executive-assistant/settings.
+
+## [2026-10-05-0004] The Gmail EA Runtime Image Does Not Keep the UI Toolchain
+
+- **Decision:** The Vite UI is built in a builder stage. The runtime image copies `ui/dist` and the server dependencies from `npm ci --omit=dev`. It does not copy `ui/node_modules`.
+- **Context:** Advisory review on #596 found `npm install` for the UI in the final stage, so Vite stayed in the published image while the description said production dependencies were omitted. Package visibility stays the one-time Package settings change in [2026-10-05-0003]. The workflow does not change it.
+- **Impact:** `tools/executive-assistant/Dockerfile`.
