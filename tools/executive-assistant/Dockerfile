@@ -22,6 +22,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /usr/src/app/ui/dist ./ui/dist
+# There is no index.js in this tree. package.json "main" / "start" and CMD
+# are node server.js. Develop copied a missing index.js from the builder.
 COPY server.js ./
 COPY delta-sync.js ./
 COPY state-manager.js ./

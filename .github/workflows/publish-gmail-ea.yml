@@ -19,6 +19,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  # docker/build-push-action@v6 writes provenance attestations by default.
   attestations: write
 
 # Visibility: this workflow never changes package visibility. GitHub creates
@@ -58,6 +59,7 @@ jobs:
           file: tools/executive-assistant/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: true
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
