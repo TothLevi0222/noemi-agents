@@ -17,18 +17,20 @@ RUN cd ui && npm run build
 FROM node:24-alpine
 
 WORKDIR /usr/src/app
+RUN chown node:node /usr/src/app
+USER node
 
-COPY package*.json ./
+COPY --chown=node:node package*.json ./
 RUN npm ci --omit=dev
 
-COPY --from=builder /usr/src/app/ui/dist ./ui/dist
+COPY --from=builder --chown=node:node /usr/src/app/ui/dist ./ui/dist
 # There is no index.js in this tree. package.json "main" / "start" and CMD
 # are node server.js. Develop copied a missing index.js from the builder.
-COPY server.js ./
-COPY delta-sync.js ./
-COPY state-manager.js ./
-COPY triage-router.js ./
-COPY oauth-manager.js ./
+COPY --chown=node:node server.js ./
+COPY --chown=node:node delta-sync.js ./
+COPY --chown=node:node state-manager.js ./
+COPY --chown=node:node triage-router.js ./
+COPY --chown=node:node oauth-manager.js ./
 
 ENV PORT=8080
 EXPOSE 8080
