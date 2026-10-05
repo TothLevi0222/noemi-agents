@@ -70,7 +70,10 @@ from coding a rejected idea.
    paths, directories) are dropped rather than kept. A source file the issue
    names stays even when this checkout does not contain it. When a finding
    asks for a path the issue does not name, the revision records that gap
-   under Stop conditions and does not invent the path. With no reviser, invalid
+   under Stop conditions and does not invent the path. A plan that says the
+   goal cannot be done, that contains a skip-red-team instruction in any
+   spacing, or that says a required path was not named in the issue is
+   `needs-info`. The unnamed-path finding stops the cycle immediately. With no reviser, invalid
    files may still be dropped and the plan re-formatted; if that does not change
    the plan, the first fail stops. The same draft is not resubmitted.
    Increment the cycle count on each red-team call. An empty file list is

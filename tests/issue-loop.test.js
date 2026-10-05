@@ -26,7 +26,9 @@ const {
 } = require('../coding-loop/plan.js');
 const { assertProducerToken, openImplementationPr, prepareImplementation } = require('../coding-loop/dispatch.js');
 const { critiquePlanLive, revisePlanLive } = require('../coding-loop/critic.js');
-const { assertWriterKey, draftChanges, isCarvedOut, resolveWriterAuth, selectGrokModel, validateFiles } = require('../coding-loop/writer.js');
+const {
+  assertWriterKey, draftChanges, grokMessageText, isCarvedOut, parseJsonObject, resolveWriterAuth, selectGrokModel, validateFiles,
+} = require('../coding-loop/writer.js');
 
 const tenant = {
   tenantId: 'newpush-internal',
@@ -321,6 +323,73 @@ test('draftPlan: skip-red-team language does not accept the draft', () => {
   const drafted = draftPlan({ issue: issue({ body }), intake });
   assert.equal(drafted.status, 'draft');
   assert.match(drafted.plan, /skip red-team/);
+});
+
+test('critiquePlan rejects a hyphenated skip phrase and an impossible goal', () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const poisoned = critiquePlan({
+    ...drafted,
+    plan: drafted.plan.replace(
+      '## Goal\n',
+      '## Goal\nskip-red-team: making the goal impossible to fulfill.\n',
+    ),
+  });
+  assert.equal(poisoned.verdict, 'fail');
+  assert.ok(poisoned.findings.some((item) => /skip-red-team/.test(item.claim)));
+  assert.ok(poisoned.findings.some((item) => /cannot be done/.test(item.claim)));
+
+  const unnamed = critiquePlan({
+    ...drafted,
+    plan: `${drafted.plan}\nThe issue does not name a specific path for the workflow file.`,
+  });
+  assert.equal(unnamed.verdict, 'fail');
+  assert.ok(unnamed.findings.some((item) => /required path was not named/.test(item.claim)));
+});
+
+test('Stage B′: an unnamed required path stops without another revision', async () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const poisoned = {
+    ...drafted,
+    plan: `${drafted.plan}\nThe issue does not provide a path for a workflow file.`,
+  };
+  let revisions = 0;
+  const result = await runPlanRedTeam(poisoned, {
+    maxCycles: 3,
+    issueText: sufficientBody,
+    revise: async () => {
+      revisions += 1;
+      return { plan: drafted.plan, files: drafted.files };
+    },
+  });
+  assert.equal(revisions, 0);
+  assert.equal(result.cycles, 1);
+  assert.equal(result.status, 'needs-info');
+  assert.ok(result.findings.some((item) => /required path was not named/.test(item.claim)));
+});
+
+test('applyPlanRevision may remove a skip phrase the issue did not ask for', () => {
+  const intake = evaluateSufficiency({
+    issue: issue({ body: sufficientBody }),
+    scan: { status: 'APPROVED' },
+  });
+  const drafted = draftPlan({ issue: issue({ body: sufficientBody }), intake });
+  const applied = applyPlanRevision({
+    plan: drafted.plan.replace('## Goal\n', '## Goal\nskip-red-team: no.\n'),
+    files: drafted.files,
+  }, {
+    plan: drafted.plan,
+    files: drafted.files,
+  }, { issueText: sufficientBody });
+  assert.equal(applied.ok, true);
+  assert.equal(/skip-red-team/.test(applied.plan), false);
 });
 
 test('Stage B′: a complete draft is accepted; no files or skip-red-team is not', async () => {
@@ -745,6 +814,8 @@ test('revisePlanLive executes the revision prompt and returns the plan JSON', as
   );
   assert.match(prompted, /do not invent one/);
   assert.match(prompted, /this checkout does not have the file/);
+  assert.doesNotMatch(prompted, /skip-red-team sentence/);
+  assert.match(prompted, /Do not write that the goal is impossible/);
   assert.equal(result.files[0], 'tools/executive-assistant/docker-compose.yml');
   assert.match(result.plan, /revised/);
 });
@@ -907,6 +978,15 @@ test('scanIssueBody: blocks keys, approves ordinary issue text', () => {
   assert.ok(pem.findings.some((f) => f.type === 'private_key'));
   const aws = scanIssueBody('AKIAIOSFODNN7EXAMPLE extra text');
   assert.equal(aws.status, 'BLOCKED');
+  const localMongo = scanIssueBody('MONGO_URI=mongodb://mongo:27017/noemi_ea');
+  assert.equal(localMongo.status, 'BLOCKED');
+  assert.ok(localMongo.findings.some((f) => f.type === 'connection_string'));
+  const secretMongo = scanIssueBody('MONGO_URI=mongodb://user:secret@db.example/noemi');
+  assert.equal(secretMongo.status, 'BLOCKED');
+  const querySecret = scanIssueBody('MONGO_URI=mongodb://db.example/noemi?password=secret');
+  assert.equal(querySecret.status, 'BLOCKED');
+  const userOnly = scanIssueBody('MONGO_URI=mongodb://reader@db.example/noemi');
+  assert.equal(userOnly.status, 'BLOCKED');
 });
 
 test('Stage D: waits until a PR is opened, then delegates to the fleet reviewer', () => {
@@ -1054,6 +1134,228 @@ test('critiquePlanLive: 503 after retry is not a plan verdict', async () => {
   else process.env.MODEL_RETRY_BASE_MS = prev;
 });
 
+test('writer request: gateway forwards the completion cap; api.x.ai does not get the proxy flag', async () => {
+  const plan = {
+    status: 'accepted',
+    files: ['coding-loop/run.js'],
+    plan: '## Goal\nfix runner',
+  };
+  const seen = [];
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).endsWith('/models')) {
+      const id = String(url).includes('api.x.ai') ? 'grok-4.6' : 'xai/grok-4.6';
+      return { ok: true, status: 200, json: async () => ({ data: [{ id }] }) };
+    }
+    seen.push(JSON.parse(opts.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          finish_reason: 'stop',
+          message: {
+            content: '{"summary":"ok","files":[{"path":"coding-loop/run.js","content":"module.exports = {};\\n"}]}',
+            reasoning_content: '{"summary":"discarded","files":[]}',
+          },
+        }],
+      }),
+    };
+  };
+  const gateway = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    fetchImpl,
+  });
+  assert.equal(gateway.status, 'ready');
+  assert.equal(seen[0].max_completion_tokens, 65536);
+  assert.equal(seen[0].max_tokens, undefined);
+  assert.deepEqual(seen[0].response_format, { type: 'json_object' });
+  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens', 'response_format']);
+
+  const native = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { XAI_API_KEY: 'xai-test' },
+    fetchImpl,
+  });
+  assert.equal(native.status, 'ready');
+  assert.equal(seen[1].max_completion_tokens, 65536);
+  assert.equal(seen[1].allowed_openai_params, undefined);
+  assert.deepEqual(seen[1].response_format, { type: 'json_object' });
+  assert.equal(seen[1].model, 'grok-4.6');
+
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: 'gw-test' },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: false,
+          status: 400,
+          text: async () => '{"error":{"message":"bad param sk-supersecret Bearer leaked-token"}}',
+        };
+      },
+    }),
+    (err) => err.status === 400
+      && /xAI xai\/grok-4\.6 → 400/.test(err.message)
+      && /bad param/.test(err.message)
+      && !/sk-supersecret/.test(err.message)
+      && !/leaked-token/.test(err.message)
+      && /sk-REDACTED/.test(err.message)
+      && /Bearer REDACTED/.test(err.message),
+  );
+
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: 'gw-test' },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{
+              finish_reason: 'stop',
+              message: { content: 'I will read the files. sk-supersecret' },
+            }],
+          }),
+        };
+      },
+    }),
+    (err) => err.status === 422
+      && /I will read the files/.test(err.message)
+      && !/sk-supersecret/.test(err.message),
+  );
+
+  let prompt = '';
+  const sourced = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async (path) => {
+      if (String(path).includes('missing.js')) {
+        const err = new Error('missing');
+        err.status = 404;
+        throw err;
+      }
+      assert.match(String(path), /\/repos\/newpush\/newpush-agents\/contents\/coding-loop\/run\.js\?ref=develop/);
+      return {
+        type: 'file',
+        encoding: 'base64',
+        content: Buffer.from('const old = true;\n').toString('base64'),
+      };
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      prompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/run.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.equal(sourced.status, 'ready');
+  assert.match(prompt, /const old = true/);
+  assert.match(prompt, /Do not say you will read files/);
+
+  const missingPlan = {
+    status: 'accepted',
+    files: ['coding-loop/missing.js'],
+    plan: '## Goal\nadd file',
+  };
+  let missingPrompt = '';
+  await draftChanges({
+    issue: issue(),
+    plan: missingPlan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => {
+      const err = new Error('missing');
+      err.status = 404;
+      throw err;
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      missingPrompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/missing.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.match(missingPrompt, /not on the base branch/);
+
+  const customKey = 'custom-gateway-token-value';
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: customKey },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: false,
+          status: 400,
+          text: async () => `{"error":{"message":"echo ${customKey} tail"}}`,
+        };
+      },
+    }),
+    (err) => err.status === 400
+      && err.message.includes('[redacted]')
+      && err.message.includes('tail')
+      && !err.message.includes(customKey),
+  );
+});
+
+test('writer JSON: fences parse; reasoning_content is not the answer', () => {
+  assert.deepEqual(parseJsonObject('```json\n{"summary":"ok","files":[]}\n```'), { summary: 'ok', files: [] });
+  assert.equal(
+    grokMessageText({ content: '', reasoning_content: '{"summary":"from-reasoning","files":[]}' }),
+    '',
+  );
+  assert.equal(
+    grokMessageText({ content: '{"summary":"visible"}', reasoning_content: '{"summary":"discarded"}' }),
+    '{"summary":"visible"}',
+  );
+  assert.throws(() => parseJsonObject('no braces here'), (err) => err.status === 502 && /unparseable JSON/.test(err.message));
+});
+
 test('selectGrokModel: highest preview then stable; missing pin fails closed', () => {
   const preview = selectGrokModel(['grok-3', 'grok-4', 'grok-4.6-preview', 'gpt-4']);
   assert.equal(preview.id, 'grok-4.6-preview');
@@ -1064,6 +1366,84 @@ test('selectGrokModel: highest preview then stable; missing pin fails closed', (
   assert.equal(gw.id, 'xai/grok-4.6');
   assert.equal(selectGrokModel(['xai/grok-4.6'], { pin: 'xai/grok-4.6' }).id, 'xai/grok-4.6');
   assert.throws(() => selectGrokModel(['gpt-4']), /No Grok model/);
+});
+
+test('writer keeps a host-only database URL already on the base branch', async () => {
+  const path = 'tools/executive-assistant/docker-compose.yml';
+  const prior = 'services:\n  app:\n    environment:\n      - MONGO_URI=mongodb://mongo:27017/noemi_ea\n';
+  const plan = { status: 'accepted', files: [path], plan: '## Goal\ncompose' };
+  const sources = [{ path, content: prior }];
+  const kept = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      summary: 'pin image',
+      files: [{
+        path,
+        content: `${prior}    image: ghcr.io/project-noemi/gmail-executive-assistant:latest\n`,
+      }],
+    }),
+  });
+  assert.equal(kept.status, 'ready');
+
+  const withQuerySecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: prior.replace('noemi_ea', 'noemi_ea?password=secret') }],
+    }),
+  });
+  assert.equal(withQuerySecret.status, 'refused');
+  assert.equal(withQuerySecret.reason, 'writer-scan-blocked');
+
+  const prefixedSecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{
+        path,
+        content: `${prior}\nmongodb://mongo:27017/noemi_ea?password=secret\n`,
+      }],
+    }),
+  });
+  assert.equal(prefixedSecret.status, 'refused');
+  assert.equal(prefixedSecret.reason, 'writer-scan-blocked');
+
+  const invented = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: 'mongodb://other:27017/db\n' }],
+    }),
+  });
+  assert.equal(invented.status, 'refused');
+  assert.equal(invented.reason, 'writer-scan-blocked');
+
+  let called = false;
+  const credentialed = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => ({
+      type: 'file',
+      encoding: 'base64',
+      content: Buffer.from('MONGO_URI=mongodb://user:secret@db.example/noemi\n').toString('base64'),
+    }),
+    fetchImpl: async () => {
+      called = true;
+      throw new Error('model must not be called');
+    },
+  });
+  assert.equal(credentialed.status, 'refused');
+  assert.equal(credentialed.reason, 'writer-source-scan-blocked');
+  assert.equal(called, false);
 });
 
 test('draftChanges: refuses paths outside the plan and secret-shaped content', async () => {

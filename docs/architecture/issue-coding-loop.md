@@ -198,7 +198,9 @@ attacks the plan, not the future diff. Verdicts:
   grounded in the issue stops the cycle. A source file the issue names stays
   even when this checkout does not contain it. A finding that asks for a path
   the issue does not name is recorded under Stop conditions; the revision does
-  not invent that path. With no reviser, invalid files may
+  not invent that path. A plan that says the goal cannot be done, that contains
+  a skip-red-team instruction, or that says a required path was not named is
+  `needs-info` and does not proceed to Stage C. With no reviser, invalid files may
   still be dropped and the plan re-formatted; an unchanged plan stops. The
   same draft is not resubmitted. Until Stage B has an unattended resolver,
   `--live-critic` executes the prompt with the same Gemini Pro caller as B′.
@@ -214,7 +216,8 @@ Default `maxCycles` is 3 (`docs/model-routing.json` → `planRedTeam`).
 as `noemi-agent`. Label `noemi:in-progress`. Open a PR against `develop` (then
 `dev`). Never against `main` when an integration branch exists (Decision
 [2026-08-16-0003]). `--implement` prepares the envelope (`opened: false`).
-`--implement --open-pr` calls Grok (`coding-loop/writer.js`) and opens the
+`--implement --open-pr` reads the allow-listed files from the base branch,
+calls Grok for one JSON object (`coding-loop/writer.js`), and opens the
 PR with `AGENT_GH_TOKEN` (`coding-loop/dispatch.js`). Pickup does not open
 PRs just because the producer token is present.
 

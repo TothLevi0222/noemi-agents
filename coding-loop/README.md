@@ -163,8 +163,21 @@ conductor token is refused.
 `XAI_API_KEY` against `https://api.x.ai/v1`, **or** NewPush gateway
 `AI_GW_API_TOKEN` / `AI_GW_API_KEY` at `https://ai-gw.newpush.com/v1` (override
 `AI_GW_BASE_URL`). Gateway model ids are `provider/id`; the writer pins
-`xai/grok-4.6` unless `XAI_CODE_MODEL` is set. The virtual key is never sent
-to api.x.ai. See [`docs/tool-usages/newpush-ai-gateway.md`](../docs/tool-usages/newpush-ai-gateway.md).
+`xai/grok-4.6` unless `XAI_CODE_MODEL` is set. The request sets
+`max_completion_tokens` (default 65536, override `XAI_MAX_TOKENS`) so thinking
+tokens are not taken from the file JSON. The NewPush gateway is LiteLLM and
+rejects that field for `grok-4.6` unless the body also sends
+`allowed_openai_params: ["max_completion_tokens", "response_format"]`. Native
+`api.x.ai` does not get that proxy flag. The request also sets
+`response_format: { "type": "json_object" }`. Before that call, the writer reads
+each allow-listed file from the target repo at the base branch and puts the
+text in the prompt. Grok has no tools; a sentence about reading files is not
+a diff. A non-OK reply includes a short redacted body: the key sent on the
+request is removed before `sk-` and `Bearer` redaction and before the
+400-character slice. A reply whose visible answer has no JSON object fails
+closed and includes a short redacted preview. That failure is not retried.
+`reasoning_content` is not parsed. The virtual key is never sent to api.x.ai. See
+[`docs/tool-usages/newpush-ai-gateway.md`](../docs/tool-usages/newpush-ai-gateway.md).
 It opens the PR as `noemi-agent`. It refuses paths outside the plan,
 governance carve-outs, and secret-shaped content. It does not approve or
 merge. Tests inject the model and GitHub clients; they do not open live PRs.
