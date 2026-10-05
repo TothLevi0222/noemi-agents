@@ -978,6 +978,15 @@ test('scanIssueBody: blocks keys, approves ordinary issue text', () => {
   assert.ok(pem.findings.some((f) => f.type === 'private_key'));
   const aws = scanIssueBody('AKIAIOSFODNN7EXAMPLE extra text');
   assert.equal(aws.status, 'BLOCKED');
+  const localMongo = scanIssueBody('MONGO_URI=mongodb://mongo:27017/noemi_ea');
+  assert.equal(localMongo.status, 'BLOCKED');
+  assert.ok(localMongo.findings.some((f) => f.type === 'connection_string'));
+  const secretMongo = scanIssueBody('MONGO_URI=mongodb://user:secret@db.example/noemi');
+  assert.equal(secretMongo.status, 'BLOCKED');
+  const querySecret = scanIssueBody('MONGO_URI=mongodb://db.example/noemi?password=secret');
+  assert.equal(querySecret.status, 'BLOCKED');
+  const userOnly = scanIssueBody('MONGO_URI=mongodb://reader@db.example/noemi');
+  assert.equal(userOnly.status, 'BLOCKED');
 });
 
 test('Stage D: waits until a PR is opened, then delegates to the fleet reviewer', () => {
@@ -1161,7 +1170,8 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
   assert.equal(gateway.status, 'ready');
   assert.equal(seen[0].max_completion_tokens, 65536);
   assert.equal(seen[0].max_tokens, undefined);
-  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens']);
+  assert.deepEqual(seen[0].response_format, { type: 'json_object' });
+  assert.deepEqual(seen[0].allowed_openai_params, ['max_completion_tokens', 'response_format']);
 
   const native = await draftChanges({
     issue: issue(),
@@ -1172,6 +1182,7 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
   assert.equal(native.status, 'ready');
   assert.equal(seen[1].max_completion_tokens, 65536);
   assert.equal(seen[1].allowed_openai_params, undefined);
+  assert.deepEqual(seen[1].response_format, { type: 'json_object' });
   assert.equal(seen[1].model, 'grok-4.6');
 
   await assert.rejects(
@@ -1198,6 +1209,115 @@ test('writer request: gateway forwards the completion cap; api.x.ai does not get
       && /sk-REDACTED/.test(err.message)
       && /Bearer REDACTED/.test(err.message),
   );
+
+  await assert.rejects(
+    () => draftChanges({
+      issue: issue(),
+      plan,
+      env: { AI_GW_API_TOKEN: 'gw-test' },
+      fetchImpl: async (url) => {
+        if (String(url).endsWith('/models')) {
+          return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{
+              finish_reason: 'stop',
+              message: { content: 'I will read the files. sk-supersecret' },
+            }],
+          }),
+        };
+      },
+    }),
+    (err) => err.status === 422
+      && /I will read the files/.test(err.message)
+      && !/sk-supersecret/.test(err.message),
+  );
+
+  let prompt = '';
+  const sourced = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async (path) => {
+      if (String(path).includes('missing.js')) {
+        const err = new Error('missing');
+        err.status = 404;
+        throw err;
+      }
+      assert.match(String(path), /\/repos\/newpush\/newpush-agents\/contents\/coding-loop\/run\.js\?ref=develop/);
+      return {
+        type: 'file',
+        encoding: 'base64',
+        content: Buffer.from('const old = true;\n').toString('base64'),
+      };
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      prompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/run.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.equal(sourced.status, 'ready');
+  assert.match(prompt, /const old = true/);
+  assert.match(prompt, /Do not say you will read files/);
+
+  const missingPlan = {
+    status: 'accepted',
+    files: ['coding-loop/missing.js'],
+    plan: '## Goal\nadd file',
+  };
+  let missingPrompt = '';
+  await draftChanges({
+    issue: issue(),
+    plan: missingPlan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => {
+      const err = new Error('missing');
+      err.status = 404;
+      throw err;
+    },
+    fetchImpl: async (url, opts = {}) => {
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'xai/grok-4.6' }] }) };
+      }
+      missingPrompt = JSON.parse(opts.body).messages[1].content;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: '{"summary":"ok","files":[{"path":"coding-loop/missing.js","content":"module.exports = {};\\n"}]}',
+            },
+          }],
+        }),
+      };
+    },
+  });
+  assert.match(missingPrompt, /not on the base branch/);
 
   const customKey = 'custom-gateway-token-value';
   await assert.rejects(
@@ -1246,6 +1366,84 @@ test('selectGrokModel: highest preview then stable; missing pin fails closed', (
   assert.equal(gw.id, 'xai/grok-4.6');
   assert.equal(selectGrokModel(['xai/grok-4.6'], { pin: 'xai/grok-4.6' }).id, 'xai/grok-4.6');
   assert.throws(() => selectGrokModel(['gpt-4']), /No Grok model/);
+});
+
+test('writer keeps a host-only database URL already on the base branch', async () => {
+  const path = 'tools/executive-assistant/docker-compose.yml';
+  const prior = 'services:\n  app:\n    environment:\n      - MONGO_URI=mongodb://mongo:27017/noemi_ea\n';
+  const plan = { status: 'accepted', files: [path], plan: '## Goal\ncompose' };
+  const sources = [{ path, content: prior }];
+  const kept = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      summary: 'pin image',
+      files: [{
+        path,
+        content: `${prior}    image: ghcr.io/project-noemi/gmail-executive-assistant:latest\n`,
+      }],
+    }),
+  });
+  assert.equal(kept.status, 'ready');
+
+  const withQuerySecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: prior.replace('noemi_ea', 'noemi_ea?password=secret') }],
+    }),
+  });
+  assert.equal(withQuerySecret.status, 'refused');
+  assert.equal(withQuerySecret.reason, 'writer-scan-blocked');
+
+  const prefixedSecret = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{
+        path,
+        content: `${prior}\nmongodb://mongo:27017/noemi_ea?password=secret\n`,
+      }],
+    }),
+  });
+  assert.equal(prefixedSecret.status, 'refused');
+  assert.equal(prefixedSecret.reason, 'writer-scan-blocked');
+
+  const invented = await draftChanges({
+    issue: issue(),
+    plan,
+    sources,
+    callModel: async () => ({
+      files: [{ path, content: 'mongodb://other:27017/db\n' }],
+    }),
+  });
+  assert.equal(invented.status, 'refused');
+  assert.equal(invented.reason, 'writer-scan-blocked');
+
+  let called = false;
+  const credentialed = await draftChanges({
+    issue: issue(),
+    plan,
+    env: { AI_GW_API_TOKEN: 'gw-test' },
+    repo: 'newpush/newpush-agents',
+    base: 'develop',
+    token: 'producer',
+    ghImpl: async () => ({
+      type: 'file',
+      encoding: 'base64',
+      content: Buffer.from('MONGO_URI=mongodb://user:secret@db.example/noemi\n').toString('base64'),
+    }),
+    fetchImpl: async () => {
+      called = true;
+      throw new Error('model must not be called');
+    },
+  });
+  assert.equal(credentialed.status, 'refused');
+  assert.equal(credentialed.reason, 'writer-source-scan-blocked');
+  assert.equal(called, false);
 });
 
 test('draftChanges: refuses paths outside the plan and secret-shaped content', async () => {
