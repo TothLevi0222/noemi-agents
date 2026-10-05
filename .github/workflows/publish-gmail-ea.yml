@@ -33,6 +33,8 @@ permissions:
 # that clone's image is world-pullable (Decision [2026-10-05-0005]).
 # :latest is retagged from develop pushes and workflow_dispatch only
 # (Decision [2026-10-05-0006]).
+# Private clones read package visibility before push (Decision
+# [2026-10-05-0007]); the post-push anonymous inspect remains.
 jobs:
   publish:
     name: Build and push GHCR image
@@ -43,6 +45,41 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Refuse a public package before push (private clones)
+        if: github.repository_owner != 'project-noemi'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          NAME=gmail-executive-assistant
+          vis=""
+          err=/tmp/pkg-vis.err
+          for prefix in orgs users; do
+            if vis=$(gh api "/${prefix}/${OWNER}/packages/container/${NAME}" --jq .visibility 2>"${err}"); then
+              break
+            fi
+            if grep -Eq 'HTTP 404|Not Found' "${err}"; then
+              vis=""
+              continue
+            fi
+            echo "Could not read package visibility via /${prefix}/${OWNER}/packages."
+            cat "${err}"
+            exit 1
+          done
+          if [ -z "${vis}" ]; then
+            echo 'Package does not exist yet. First push stays private by default.'
+            exit 0
+          fi
+          if [ "${vis}" = public ]; then
+            echo 'Package visibility is public. Refusing to push new layers.'
+            echo 'Private agent work keeps GitHub Packages private.'
+            echo 'Leave org Settings → Packages → Package creation → Public unchecked.'
+            echo 'See README (GitHub Packages on a private clone) and docs/UPSTREAM_SYNC.md.'
+            exit 1
+          fi
+          echo "Package visibility is ${vis}. Safe to push."
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

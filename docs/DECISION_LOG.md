@@ -1458,3 +1458,9 @@
 - **Decision:** The publish workflow runs on path-filtered `push` to `develop` and on `workflow_dispatch`. Feature-branch pushes do not retag `:latest`. `permissions` include `id-token: write` and `attestations: write` so `docker/build-push-action@v6` can sign provenance. The UI builder copies `ui/package-lock.json` and runs `npm ci`.
 - **Context:** Advisory code review on #596: unfiltered `push` overwrote `:latest` from any branch; `provenance: true` without `id-token: write`; builder `npm install` with only `ui/package.json`.
 - **Impact:** `.github/workflows/publish-gmail-ea.yml`, `tools/executive-assistant/Dockerfile`, `tools/executive-assistant/ui/package-lock.json`.
+
+## [2026-10-05-0007] Private Clones Check GHCR Visibility Before Push
+
+- **Decision:** On owners other than `project-noemi`, the publish workflow reads GitHub Packages visibility (`/orgs` then `/users`) **before** `docker/build-push-action`. A `public` package fails the job without pushing. A 404 means the package does not exist yet and first push stays private. Unexpected API errors fail closed. The post-push anonymous inspect remains.
+- **Context:** Advisory code review on #596: `Refuse an anonymous pull` ran after `push: true`, so a public clone package would receive new layers before the job failed.
+- **Impact:** `.github/workflows/publish-gmail-ea.yml`.
