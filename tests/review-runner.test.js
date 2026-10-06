@@ -652,6 +652,14 @@ test('reviewer credential preference: app token shadows PATs, distinct name', ()
     assert.ok(appIdx < patIdx, 'app token must be consulted before any PAT');
 });
 
+test('workflow: reviewer checkout is the pinned tooling repo, never the PR head', () => {
+    const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ai-review.yml'), 'utf8');
+    assert.match(yml, /never the PR head/);
+    assert.match(yml, /repository: project-noemi\/agents/);
+    assert.match(yml, /ref: \$\{\{ inputs\.tooling-ref \|\| 'main' \}\}/);
+    assert.doesNotMatch(yml, /ref: \$\{\{ github\.event\.pull_request\.head/);
+});
+
 test('workflow: review discovers the highest Pro preview (no hard pin)', () => {
     const yml = fs.readFileSync(path.join(__dirname, '..', '.github/workflows/ai-review.yml'), 'utf8');
     assert.match(yml, /GEMINI_REVIEW_MODEL: \$\{\{ vars\.GEMINI_REVIEW_MODEL \|\| 'auto' \}\}/);

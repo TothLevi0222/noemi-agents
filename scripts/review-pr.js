@@ -255,6 +255,12 @@ async function loadSentinelFromGithub(token) {
   return res.text();
 }
 
+/**
+ * Read compliance.md from the directory that contains this script. The review
+ * workflow checks out project-noemi/agents at the pinned tooling ref, never
+ * the pull-request head, so a pull request cannot change this file until that
+ * ref contains the merge. Same source as the Sentinel spec.
+ */
 function loadComplianceFromDisk() {
   const disk = path.join(__dirname, '..', COMPLIANCE_PATH);
   try {
