@@ -10,7 +10,7 @@ The shared baseline is the European Union Artificial Intelligence Act (Regulatio
 
 Use these as questions, not as a checklist that every pull request must satisfy.
 
-- **Prohibited uses.** Do not add a system that socially scores people, that scrapes facial images from the internet or CCTV to build a recognition database, that manipulates people by exploiting age or disability, or that recognizes emotions in a workplace or a school. Real-time remote biometric identification in a public space is restricted to narrow law-enforcement cases. If a change builds one of these, say so on the premise gate.
+- **Prohibited uses.** Do not add a system that socially scores people, that scrapes facial images from the internet or CCTV to build a recognition database, that manipulates people by exploiting age or disability, or that recognizes emotions in a workplace or a school. Real-time remote biometric identification in a public space is restricted to narrow law-enforcement cases. If a change builds one of these, report it on the compliance gate.
 - **Human oversight.** A system that makes a decision about a person (access, credit, employment, essential services, law enforcement) needs a named human who can stop it. The coding loop already keeps merge and approval with a human. A change that removes that human step conflicts with this guidance.
 - **Transparency.** When a person is interacting with an AI system and the Act requires them to know that, the product should say so. A review mentions the gap. It does not draft a legal notice.
 - **Records.** A higher-risk system should be able to show what it did. An audit log that contains secrets or personal data is not the record this guidance means.

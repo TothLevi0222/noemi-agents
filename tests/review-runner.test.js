@@ -177,6 +177,8 @@ test('compliance guidance loads from the Sentinel directory and is not a persona
     assert.match(text, /# Compliance guidance/);
     assert.match(text, /GDPR|General Data Protection Regulation/);
     assert.match(text, /2024\/1689/);
+    assert.match(text, /report it on the compliance gate/);
+    assert.doesNotMatch(text, /premise gate/);
     assert.doesNotMatch(text, /## Role/);
 });
 
