@@ -1476,3 +1476,9 @@
 - **Decision:** The review runs a fourth gate, `compliance`, after premise, framing, and code. Its source is `agents/coding/sentinel/compliance.md`. A clear conflict fails that gate. Merging a pull request whose latest verdict failed only `compliance` does not open a calibration entry. The deploying organization decides whether to comply. A premise, framing, or code failure still opens one.
 - **Context:** Operators asked for the compliance source to be a real gate, and for an override of that gate to stay at the organization's discretion.
 - **Impact:** `scripts/review-pr.js`, `scripts/calibration-watch.js`, `agents/coding/sentinel/compliance.md`, `agents/engineering/pr-reviewer.md`, `coding-loop/README.md`, `tests/review-runner.test.js`, `tests/calibration-watch.test.js`.
+
+## [2026-10-06-0003] The Reviewer Halts When the Diff Changes Review Behavior
+
+- **Decision:** A diff that touches the review runner, the calibration watch, the Sentinel spec, the compliance guidance, or the reviewer persona is a governance carve-out. The reviewer halts and a human reviews it. The review job checks out `project-noemi/agents` at `main` unless a caller passes another tooling ref, so this halt applies to later pull requests once the change is on that ref.
+- **Context:** Pull request #602 changed how review and calibration work. The reviewer posted findings on that change instead of recusing. The operator merged it for that reason.
+- **Impact:** `scripts/review-pr.js`, `docs/AI_REVIEW_GOVERNANCE.md`, `agents/engineering/pr-reviewer.md`, `tests/review-runner.test.js`.

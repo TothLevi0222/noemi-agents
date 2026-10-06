@@ -113,8 +113,16 @@ const CARVE_OUT = [
   // where the caller lives at the same path. A PR that edits the workflow that
   // reviews it must be judged by a human, not by the reviewer it is editing.
   '.github/workflows/ai-review.yml',
+  '.github/workflows/calibration-watch.yml',
   'docs/MACHINE_IDENTITY.md',
   'docs/AI_REVIEW_GOVERNANCE.md',
+  // The reviewer's own behavior. A pull request that changes how review,
+  // calibration, or the compliance gate works is judged by a human.
+  'scripts/review-pr.js',
+  'scripts/calibration-watch.js',
+  'agents/coding/sentinel/core.md',
+  'agents/coding/sentinel/compliance.md',
+  'agents/engineering/pr-reviewer.md',
 ];
 
 const GATES = [

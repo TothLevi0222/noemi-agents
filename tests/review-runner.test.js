@@ -34,11 +34,18 @@ test('carve-out: governance-critical paths are detected', () => {
     assert.deepEqual(detectCarveOut(files), ['.github/CODEOWNERS']);
 });
 
-test('carve-out: the merge gate and both governance docs are covered', () => {
+test('carve-out: merge gate, governance docs, and review behavior are covered', () => {
     for (const f of [
         '.github/workflows/require-develop-source.yml',
+        '.github/workflows/ai-review.yml',
+        '.github/workflows/calibration-watch.yml',
         'docs/MACHINE_IDENTITY.md',
         'docs/AI_REVIEW_GOVERNANCE.md',
+        'scripts/review-pr.js',
+        'scripts/calibration-watch.js',
+        'agents/coding/sentinel/core.md',
+        'agents/coding/sentinel/compliance.md',
+        'agents/engineering/pr-reviewer.md',
     ]) {
         assert.deepEqual(detectCarveOut([f]), [f], `${f} must be carved out`);
     }
