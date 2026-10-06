@@ -29,7 +29,7 @@ One row per disagreement. Keep reasons short and concrete.
 
 | Date | PR | Model | Gate | Reviewer said | Human did | Direction | Reason |
 |---|---|---|---|---|---|---|---|
-| _example:_ 2026-08-12 | #385 | gemini-3.6-flash | code | high: missing test on new logic | dismissed | reviewer too strict | covered by integration suite the reviewer cannot see |
+| _example:_ 2026-08-12 | #385 | gemini-3.8-flash | code | high: missing test on new logic | dismissed | reviewer too strict | covered by integration suite the reviewer cannot see |
 
 **Direction** is one of:
 
