@@ -12,8 +12,10 @@ const {
     buildRemediationPrompt,
     renderComment,
     loadSentinelFromDisk,
+    loadComplianceFromDisk,
     SENTINEL_REPO,
     SENTINEL_PATH,
+    COMPLIANCE_PATH,
     SEVERITIES,
     BLOCKING_SEVERITIES,
     GATES,
@@ -140,6 +142,34 @@ test('prompt: Sentinel spec from project-noemi/agents is injected as review crit
     assert.match(p, /Trust Nothing: Verify everything/);
     assert.match(p, /you review; you do not patch/);
     assert.doesNotMatch(p, /other-org\/other-repo.*sentinel/i);
+});
+
+test('prompt: compliance guidance is injected and is not a gate', () => {
+    const p = buildGatePrompt(GATES[2], {
+        title: 'T', body: '', files: [], diff: '', repo: 'o/r', pr: '1',
+        complianceGuidance: '# Compliance guidance\nDo not put personal data into a prompt.',
+    });
+    assert.match(p, /<compliance_guidance>/);
+    assert.match(p, /not an additional gate/);
+    assert.match(p, /Do not invent legal conclusions/);
+    assert.match(p, /Do not put personal data into a prompt/);
+    assert.deepEqual(GATES.map((g) => g.id), ['premise', 'framing', 'code']);
+});
+
+test('prompt: a review without compliance guidance omits the block', () => {
+    const p = buildGatePrompt(GATES[0], {
+        title: 'T', body: 'B', files: ['a.js'], diff: 'diff', repo: 'o/r', pr: '1',
+    });
+    assert.doesNotMatch(p, /<compliance_guidance>/);
+});
+
+test('compliance guidance loads from the Sentinel directory and is not a persona', () => {
+    const text = loadComplianceFromDisk();
+    assert.equal(COMPLIANCE_PATH, 'agents/coding/sentinel/compliance.md');
+    assert.match(text, /# Compliance guidance/);
+    assert.match(text, /GDPR|General Data Protection Regulation/);
+    assert.match(text, /2024\/1689/);
+    assert.doesNotMatch(text, /## Role/);
 });
 
 test('prompt: a malicious diff is embedded as data, not interpolated as instruction', () => {

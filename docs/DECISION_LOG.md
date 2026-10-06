@@ -1464,3 +1464,9 @@
 - **Decision:** On owners other than `project-noemi`, the publish workflow reads GitHub Packages visibility (`/orgs` then `/users`) **before** `docker/build-push-action`. A `public` package fails the job without pushing. A 404 means the package does not exist yet and first push stays private. Unexpected API errors fail closed. The post-push anonymous inspect remains.
 - **Context:** Advisory code review on #596: `Refuse an anonymous pull` ran after `push: true`, so a public clone package would receive new layers before the job failed.
 - **Impact:** `.github/workflows/publish-gmail-ea.yml`.
+
+## [2026-10-06-0001] Review Reads EU AI Act and GDPR Guidance Beside Sentinel
+
+- **Decision:** `agents/coding/sentinel/compliance.md` is loaded with the Sentinel spec from this blueprint, never from the repository under review. The reviewer may cite it on an existing gate when a diff clearly conflicts with a duty it names. It is not a fourth gate, not a legal opinion, and not a finding merely because the organization is outside the European Union. The file is not an agent persona. A duty that belongs to one organization stays in that organization's agents repository.
+- **Context:** Operators asked for a simple compliance source the review can read, following the European AI Act and the GDPR, as guidance rather than a mandate.
+- **Impact:** `agents/coding/sentinel/compliance.md`, `scripts/review-pr.js`, `scripts/context_helpers.js`, `coding-loop/README.md`, `tests/review-runner.test.js`, `tests/contracts.test.js`.
