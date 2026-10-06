@@ -1470,3 +1470,9 @@
 - **Decision:** `agents/coding/sentinel/compliance.md` is loaded with the Sentinel spec from this blueprint, never from the repository under review. The reviewer may cite it on an existing gate when a diff clearly conflicts with a duty it names. It is not a fourth gate, not a legal opinion, and not a finding merely because the organization is outside the European Union. The file is not an agent persona. A duty that belongs to one organization stays in that organization's agents repository.
 - **Context:** Operators asked for a simple compliance source the review can read, following the European AI Act and the GDPR, as guidance rather than a mandate.
 - **Impact:** `agents/coding/sentinel/compliance.md`, `scripts/review-pr.js`, `scripts/context_helpers.js`, `coding-loop/README.md`, `tests/review-runner.test.js`, `tests/contracts.test.js`.
+
+## [2026-10-06-0002] A Compliance-Only Override Needs No Calibration Entry
+
+- **Decision:** The review runs a fourth gate, `compliance`, after premise, framing, and code. Its source is `agents/coding/sentinel/compliance.md`. A clear conflict fails that gate. Merging a pull request whose latest verdict failed only `compliance` does not open a calibration entry. The deploying organization decides whether to comply. A premise, framing, or code failure still opens one.
+- **Context:** Operators asked for the compliance source to be a real gate, and for an override of that gate to stay at the organization's discretion.
+- **Impact:** `scripts/review-pr.js`, `scripts/calibration-watch.js`, `agents/coding/sentinel/compliance.md`, `agents/engineering/pr-reviewer.md`, `coding-loop/README.md`, `tests/review-runner.test.js`, `tests/calibration-watch.test.js`.

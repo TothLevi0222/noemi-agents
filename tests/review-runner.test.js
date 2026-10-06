@@ -108,11 +108,12 @@ test('recommendation: a clean review reports no findings', () => {
     );
 });
 
-test('gate order is premise, framing, code', () => {
+test('gate order is premise, framing, code, then compliance', () => {
     // Order is structural: reviewing code before premise lends false legitimacy
-    // to work the reviewer is recommending against.
-    assert.deepEqual(GATES.map((g) => g.id), ['premise', 'framing', 'code']);
-    assert.deepEqual(GATES.map((g) => g.dimension), ['Delegation', 'Description', 'Diligence']);
+    // to work the reviewer is recommending against. Compliance is last, and
+    // following it is the organization's choice.
+    assert.deepEqual(GATES.map((g) => g.id), ['premise', 'framing', 'code', 'compliance']);
+    assert.deepEqual(GATES.map((g) => g.dimension), ['Delegation', 'Description', 'Diligence', 'Discernment']);
 });
 
 test('prompt: reviewed content is framed as data and injection is reportable', () => {
@@ -144,22 +145,29 @@ test('prompt: Sentinel spec from project-noemi/agents is injected as review crit
     assert.doesNotMatch(p, /other-org\/other-repo.*sentinel/i);
 });
 
-test('prompt: compliance guidance is injected and is not a gate', () => {
-    const p = buildGatePrompt(GATES[2], {
+test('prompt: compliance guidance is injected only on the compliance gate', () => {
+    const complianceGate = GATES.find((g) => g.id === 'compliance');
+    const p = buildGatePrompt(complianceGate, {
         title: 'T', body: '', files: [], diff: '', repo: 'o/r', pr: '1',
         complianceGuidance: '# Compliance guidance\nDo not put personal data into a prompt.',
     });
     assert.match(p, /<compliance_guidance>/);
-    assert.match(p, /not an additional gate/);
     assert.match(p, /Do not invent legal conclusions/);
     assert.match(p, /Do not put personal data into a prompt/);
-    assert.deepEqual(GATES.map((g) => g.id), ['premise', 'framing', 'code']);
+    const codePrompt = buildGatePrompt(GATES[2], {
+        title: 'T', body: '', files: [], diff: '', repo: 'o/r', pr: '1',
+        complianceGuidance: '# Compliance guidance\nDo not put personal data into a prompt.',
+    });
+    assert.doesNotMatch(codePrompt, /<compliance_guidance>/);
+    assert.match(codePrompt, /Do not apply the compliance guidance on this gate/);
 });
 
-test('prompt: a review without compliance guidance omits the block', () => {
-    const p = buildGatePrompt(GATES[0], {
+test('prompt: a compliance gate with no file returns no findings', () => {
+    const complianceGate = GATES.find((g) => g.id === 'compliance');
+    const p = buildGatePrompt(complianceGate, {
         title: 'T', body: 'B', files: ['a.js'], diff: 'diff', repo: 'o/r', pr: '1',
     });
+    assert.match(p, /No compliance file was loaded/);
     assert.doesNotMatch(p, /<compliance_guidance>/);
 });
 
@@ -251,7 +259,7 @@ test('remediation prompt: prioritises blocking findings over cosmetic ones', () 
 test('comment: records the model, since a verdict depends on what produced it', () => {
     const c = renderComment({
         model: 'models/gemini-x-pro', reviewed_at: '2026-08-03T00:00:00Z', pr: 'o/r#1',
-        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'pass' } },
+        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'pass' }, compliance: { verdict: 'pass' } },
         findings: [], recommendation: 'no-findings', remediation_prompt: null,
     });
     assert.match(c, /models\/gemini-x-pro/);
@@ -265,11 +273,12 @@ test('comment: skipped gates are reported as skipped, not as passed', () => {
             premise: { verdict: 'fail' },
             framing: { verdict: 'skipped' },
             code: { verdict: 'skipped' },
+            compliance: { verdict: 'skipped' },
         },
         findings: [{ gate: 'premise', severity: 'critical', file: 'x', line: null, claim: 'unnecessary', evidence: 'e' }],
         recommendation: 'escalate', remediation_prompt: null,
     });
-    assert.match(c, /Gates not run: framing, code/);
+    assert.match(c, /Gates not run: framing, code, compliance/);
     assert.match(c, /skipped, not passed|skipped, not\s+passed/);
     assert.match(c, /Premise gate failed/);
 });
@@ -277,7 +286,7 @@ test('comment: skipped gates are reported as skipped, not as passed', () => {
 test('comment: a coerced severity is surfaced, not hidden', () => {
     const c = renderComment({
         model: 'm', reviewed_at: 'now', pr: 'o/r#1',
-        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'fail' } },
+        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'fail' }, compliance: { verdict: 'skipped' } },
         findings: [{ gate: 'code', severity: 'high', file: 'a.js', line: 1, claim: 'c', evidence: '', severity_coerced_from: 'blocker' }],
         recommendation: 'request-changes', remediation_prompt: null,
     });
@@ -288,10 +297,25 @@ test('comment: a coerced severity is surfaced, not hidden', () => {
 test('comment: states plainly that the review does not approve or block', () => {
     const c = renderComment({
         model: 'm', reviewed_at: 'now', pr: 'o/r#1',
-        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'pass' } },
+        gates: { premise: { verdict: 'pass' }, framing: { verdict: 'pass' }, code: { verdict: 'pass' }, compliance: { verdict: 'pass' } },
         findings: [], recommendation: 'no-findings', remediation_prompt: null,
     });
     assert.match(c, /does not approve, merge, or block/);
+});
+
+test('comment: a compliance-only failure says the merge needs no calibration entry', () => {
+    const c = renderComment({
+        model: 'm', reviewed_at: 'now', pr: 'o/r#1',
+        gates: {
+            premise: { verdict: 'pass' },
+            framing: { verdict: 'pass' },
+            code: { verdict: 'pass' },
+            compliance: { verdict: 'fail' },
+        },
+        findings: [{ gate: 'compliance', severity: 'high', file: 'a.js', line: 1, claim: 'personal data in the prompt', evidence: 'e' }],
+        recommendation: 'request-changes', remediation_prompt: null,
+    });
+    assert.match(c, /does not require a calibration entry/);
 });
 
 // --- model resolution ------------------------------------------------------

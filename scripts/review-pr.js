@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Three-gate cross-model review runner (phase 1 of docs/AI_REVIEW_GOVERNANCE.md).
+ * Cross-model review runner (phase 1 of docs/AI_REVIEW_GOVERNANCE.md).
  *
  * Claude produces the pull request; this runs a Gemini review over it and posts
  * findings. It NEVER approves, merges, or closes anything.
@@ -11,8 +11,11 @@
  *
  *   1. Carve-out       — checked before any model call. A governance-critical
  *                        diff is never sent to a model at all.
- *   2. Gate order      — premise, then framing, then code, as separate calls.
- *                        A failed gate stops the run; later gates never execute.
+ *   2. Gate order      — premise, then framing, then code, then compliance, as
+ *                        separate calls. A failed gate stops the run; later
+ *                        gates never execute. A compliance-only failure is the
+ *                        deploying organization's choice: calibration does not
+ *                        log a merge over that gate alone.
  *   3. Severity        — validated against the rubric in the governance doc.
  *                        The model cannot invent tiers or reclassify its way to
  *                        a clean result. Unknown severities are coerced UP.
@@ -143,7 +146,21 @@ Undisclosed scope is at least 'high': it defeats a reviewer's ability to allocat
 security (injection, secret handling, authentication, privilege boundaries), repository
 standards, test adequacy — including whether the tests would actually fail if the change
 were wrong — and maintainability.
-Do not manufacture findings to appear diligent. "No findings" is a valid, expected outcome.`,
+Do not manufacture findings to appear diligent. "No findings" is a valid, expected outcome.
+Do not apply the compliance guidance on this gate. The compliance gate does that.`,
+  },
+  {
+    id: 'compliance',
+    dimension: 'Discernment',
+    question: 'Does this change conflict with the compliance guidance?',
+    instruction: `Evaluate ONLY against the compliance guidance included in this prompt.
+A clear conflict is a finding: personal data written into a prompt, a log, or the
+repository; a prohibited use added as a feature; or a human approval step removed.
+Use high for a clear conflict and critical for a prohibited use. If nothing in the
+diff conflicts, return no findings.
+Do not invent a legal conclusion. Do not fail a change because the organization is
+outside the European Union. Do not demand a certification or an impact assessment.
+If no compliance guidance was provided, return no findings.`,
   },
 ];
 
@@ -303,19 +320,23 @@ ${ctx.sentinelSpec}
 `
     : '';
 
-  const compliance = ctx.complianceGuidance
-    ? `
+  const compliance = gate.id !== 'compliance'
+    ? ''
+    : ctx.complianceGuidance
+      ? `
 ## Compliance guidance — from \`${SENTINEL_REPO}\`, not the reviewed repository
-The following file is guidance for people deploying this loop and for this review.
-It is not a legal opinion and not an additional gate. Do not fail a change merely
-because the organization is outside the European Union. Report a finding on the
-current gate only when the diff clearly conflicts with a duty named below.
-Do not invent legal conclusions.
+Apply the following file on this gate only. It is guidance for the deploying
+organization, not a legal opinion. Report a finding when the diff clearly
+conflicts with a duty it names. Do not fail a change merely because the
+organization is outside the European Union. Do not invent legal conclusions.
 <compliance_guidance>
 ${ctx.complianceGuidance}
 </compliance_guidance>
 `
-    : '';
+      : `
+## Compliance guidance
+No compliance file was loaded. Return no findings for this gate.
+`;
 
   return `You are reviewing a pull request as an independent adversarial reviewer.
 You are a DIFFERENT model family than the one that wrote this code. Your value is
@@ -407,7 +428,7 @@ function renderComment(review) {
     out.push(`**Sentinel spec:** \`${review.sentinel_source}\``, '');
   }
   if (review.compliance_source) {
-    out.push(`**Compliance guidance:** \`${review.compliance_source}\` (guidance, not a gate)`, '');
+    out.push(`**Compliance guidance:** \`${review.compliance_source}\``, '');
   }
 
   const icon = { pass: '✅', fail: '❌', skipped: '⏭️' };
@@ -440,6 +461,11 @@ function renderComment(review) {
 
   if (review.recommendation === 'escalate') {
     out.push('> **Premise gate failed.** "This should not be merged at all" is the most consequential and most subjective verdict available, so it routes to a human unconditionally and is never auto-actioned.', '');
+  }
+
+  const failedGates = GATES.filter((g) => review.gates[g.id] && review.gates[g.id].verdict === 'fail');
+  if (failedGates.length === 1 && failedGates[0].id === 'compliance') {
+    out.push('> **Compliance gate failed.** Following this guidance is the deploying organization\'s choice. Merging over this gate alone does not require a calibration entry. A premise, framing, or code failure still does.', '');
   }
 
   if (review.remediation_prompt) {

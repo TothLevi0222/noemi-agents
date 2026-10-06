@@ -193,9 +193,12 @@ producer invocation with `AGENT_GH_TOKEN` (or `AGENT_GH_TOKEN_CLASSIC` +
 Stage D delegates to the fleet reviewer when a PR URL exists
 (`coding-loop/stage-d.js`). The reviewer reads
 `agents/coding/sentinel/compliance.md` from this blueprint, next to the
-Sentinel persona. That file is guidance for the EU AI Act and the GDPR. It
-is not a fourth gate and not a legal opinion. A duty that applies only to
-one organization is recorded in that organization's agents repository.
+Sentinel persona, and applies it as the compliance gate after premise,
+framing, and code. The file is guidance for the EU AI Act and the GDPR, not
+a legal opinion. The deploying organization chooses whether to follow it: a
+merge that fails only that gate does not open a calibration entry. A duty
+that applies only to one organization is recorded in that organization's
+agents repository.
 Issue reads and `--post` use the same conductor
 token: `CONDUCTOR_APP_ID` + `CONDUCTOR_APP_PRIVATE_KEY` (or
 `CONDUCTOR_GH_TOKEN`). `--post` only adds the comment and the label. See

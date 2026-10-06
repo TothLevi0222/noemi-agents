@@ -1,6 +1,8 @@
 # Compliance guidance
 
-This file sits next to the Sentinel persona so the reviewer can read it. It is guidance for people deploying the coding loop and for the review of a pull request. It is not a legal opinion, not a certification, and not an additional review gate.
+This file is the source for the review's compliance gate. It sits next to the Sentinel persona and is loaded from this blueprint, not from the repository under review.
+
+It is guidance. It is not a legal opinion and not a certification. The deploying organization chooses whether to follow it. A human may merge a pull request that fails only this gate, and that merge does not require a calibration entry. A failure of premise, framing, or code still does.
 
 The shared baseline is the European Union Artificial Intelligence Act (Regulation (EU) 2024/1689) and the General Data Protection Regulation (Regulation (EU) 2016/679). An organization outside the Union can still use this baseline. A duty that applies only to one organization belongs in that organization's own agents repository. This file does not fail a change merely because the organization is outside the European Union.
 
@@ -22,6 +24,6 @@ Use these as questions, not as a checklist that every pull request must satisfy.
 
 ## What the reviewer may say
 
-On the current gate only, report a finding when the diff clearly conflicts with a duty named above. Examples: personal data written into a prompt or a log, a prohibited use added as a feature, or a human approval step removed.
+On the compliance gate, report a finding when the diff clearly conflicts with a duty named above. Examples: personal data written into a prompt or a log, a prohibited use added as a feature, or a human approval step removed.
 
 Do not invent a legal conclusion, demand a data-protection impact assessment, or declare an organization non-compliant. A missing mention of Europe is not a finding.
